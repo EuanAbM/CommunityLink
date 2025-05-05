@@ -27,9 +27,13 @@ export function formatDateTime(date: Date | string | undefined): string {
   })
 }
 
-export function getInitials(firstName: string, lastName: string): string {
-  return `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase()
+export function getInitials(firstName?: string, lastName?: string): string {
+  const first = firstName?.charAt(0).toUpperCase() || "?";
+  const last = lastName?.charAt(0).toUpperCase() || "";
+  return `${first}${last}`;
 }
+
+
 
 export function getFullName(firstName: string, lastName: string): string {
   return `${firstName} ${lastName}`

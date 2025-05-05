@@ -1,49 +1,65 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import Link from "next/link"
 import { SiteHeader } from "@/components/layout/site-header"
 import { Button } from "@/components/ui/button"
 import { StudentCard } from "@/components/students/student-card"
 import { StudentFilter } from "@/components/students/student-filter"
-import { students } from "@/lib/data"
 import { Plus } from "lucide-react"
 
-// For demo purposes, let's give some students SEN, FSM and PP status
-const enhancedStudents = students.map((student) => ({
-  ...student,
-  sen: Math.random() > 0.7, // 30% chance of having SEN
-  fsm: Math.random() > 0.8, // 20% chance of having FSM
-  pp: Math.random() > 0.75, // 25% chance of having PP
-}))
-
 export default function StudentsPage() {
-  const [filteredStudents, setFilteredStudents] = useState(enhancedStudents)
+  const [students, setStudents] = useState([])
+  const [filteredStudents, setFilteredStudents] = useState([])
+
+  useEffect(() => {
+    const fetchStudents = async () => {
+      try {
+        const res = await fetch("/api/students");
+        const data = await res.json();
+
+        const enriched = data.map((student: any) => ({
+          ...student,
+          sen: student.sen_status !== "None",
+          fsm: Math.random() > 0.7,
+          pp: Math.random() > 0.65,
+        }));
+
+        setStudents(enriched);
+        setFilteredStudents(enriched);
+      } catch (err) {
+        console.error("Failed to fetch students", err);
+      }
+    };
+
+    fetchStudents();
+  }, []);
 
   const handleFilter = (filters: any) => {
-    let result = [...enhancedStudents]
+    let result = [...students]
 
     if (filters.yearGroup && filters.yearGroup !== "all") {
       result = result.filter((student) => student.yearGroup === filters.yearGroup)
     }
 
     if (filters.safeguardingStatus && filters.safeguardingStatus.length > 0) {
-      result = result.filter((student) => filters.safeguardingStatus.includes(student.safeguardingStatus || "None"))
+      result = result.filter((student) =>
+        filters.safeguardingStatus.includes(student.safeguarding_status || "None")
+      )
     }
 
     if (filters.searchTerm) {
       const searchTerm = filters.searchTerm.toLowerCase()
       result = result.filter(
         (student) =>
-          student.firstName.toLowerCase().includes(searchTerm) ||
-          student.lastName.toLowerCase().includes(searchTerm) ||
-          `${student.firstName} ${student.lastName}`.toLowerCase().includes(searchTerm) ||
-          student.yearGroup.toLowerCase().includes(searchTerm) ||
+          student.first_name.toLowerCase().includes(searchTerm) ||
+          student.last_name.toLowerCase().includes(searchTerm) ||
+          `${student.first_name} ${student.last_name}`.toLowerCase().includes(searchTerm) ||
+          student.year_group.toLowerCase().includes(searchTerm) ||
           student.tutor.toLowerCase().includes(searchTerm),
       )
     }
 
-    // Apply new filters
     if (filters.sen) {
       result = result.filter((student) => student.sen)
     }
@@ -97,4 +113,3 @@ export default function StudentsPage() {
     </div>
   )
 }
-
