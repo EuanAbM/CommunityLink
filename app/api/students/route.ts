@@ -5,8 +5,8 @@ import mysql from "mysql2/promise";
 export async function GET() {
   const connection = await mysql.createConnection({
     host: "localhost",
-    user: "cladmin", // or your username
-    password: "cladmin", // or your DB password
+    user: "cladmin", 
+    password: "cladmin",
     database: "communitylink",
   });
 
@@ -15,3 +15,5 @@ export async function GET() {
 
   return NextResponse.json(rows);
 }
+
+

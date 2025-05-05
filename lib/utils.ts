@@ -27,13 +27,11 @@ export function formatDateTime(date: Date | string | undefined): string {
   })
 }
 
-export function getInitials(firstName?: string, lastName?: string): string {
-  const first = firstName?.charAt(0).toUpperCase() || "?";
-  const last = lastName?.charAt(0).toUpperCase() || "";
-  return `${first}${last}`;
+export function getInitials(firstName: string | undefined, lastName: string | undefined): string {
+  const firstInitial = firstName?.charAt(0).toUpperCase() || "";
+  const lastInitial = lastName?.charAt(0).toUpperCase() || "";
+  return `${firstInitial}${lastInitial}`;
 }
-
-
 
 export function getFullName(firstName: string, lastName: string): string {
   return `${firstName} ${lastName}`
@@ -107,4 +105,3 @@ export function truncateText(text: string, maxLength: number): string {
   if (text.length <= maxLength) return text
   return text.substr(0, maxLength) + "..."
 }
-

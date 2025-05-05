@@ -1,6 +1,9 @@
+"use client"
+
 import Link from "next/link"
 import Image from "next/image"
 import { notFound } from "next/navigation"
+import { useState, useEffect } from "react"
 import { SiteHeader } from "@/components/layout/site-header"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -8,7 +11,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
-import { students, incidents, agencies } from "@/lib/data"
 import {
   formatDate,
   formatDateTime,
@@ -28,25 +30,138 @@ import {
   Phone,
   Users,
   ExternalLink,
+  Upload,
 } from "lucide-react"
 import { AttendanceTab } from "@/components/students/attendance-tab"
 import { AchievementTab } from "@/components/students/achievement-tab"
 import { IncidentsTab } from "./incidents-tab"
+import { AcademicTab } from "./academic-tab"
 
-// Define the Incident type
-interface Incident {
+// Define types
+interface StudentData {
   id: string
-  studentId: string
-  category: string
-  incidentDate: string
-  reportDate: string
-  description: string
+  first_name: string
+  last_name: string
+  date_of_birth: string
+  year_group: string
+  tutor: string
+  safeguarding_status: string
+  sen_status: string
+  has_confidential_information: number
+  ethnicity: string
+  religion: string
+  nationality: string
+  languages: string
+  address_line_1: string
+  address_line_2: string
+  town: string
+  county: string
+  postcode: string
+  country: string
+  sibling_ids: string
+  created_at: string
+  updated_at: string
+}
+
+interface EmergencyContact {
+  id: string
+  student_id: string
+  first_name: string
+  last_name: string
+  relationship: string
+  phone: string
+  email: string
+  address_line_1: string
+  address_line_2: string
+  town: string
+  county: string
+  postcode: string
+  country: string
+}
+
+interface AttendanceSummary {
+  id: string
+  student_id: string
+  present_percentage: string
+  unauthorised_absence_percentage: string
+  authorised_absence_percentage: string
+  late_percentage: string
+  recorded_on: string
+}
+
+interface Register {
+  student_id: string
+  date: string
+  session: string
   status: string
-  reportedBy: string
-  isConfidential: boolean
-  actionsTaken?: string
-  followUpRequired?: boolean
-  followUpNotes?: string
+}
+
+interface AcademicProgress {
+  id: string
+  student_id: string
+  subject: string
+  predicted_grade: string
+  working_at_grade: string
+  expected_grade: string
+  updated_at: string
+}
+
+interface Achievement {
+  id: string
+  student_id: string
+  title: string
+  description: string
+  date: string
+  awarded_by: string
+}
+
+interface Extracurricular {
+  id: string
+  student_id: string
+  activity_name: string
+  role: string
+  description: string
+  start_date: string
+  end_date: string | null
+}
+
+interface Agency {
+  id: string
+  student_id: string
+  agency_name: string
+  contact_name: string
+  contact_role: string
+  contact_phone: string
+  contact_email: string
+  address_line_1: string
+  address_line_2: string
+  town: string
+  county: string
+  postcode: string
+  country: string
+  notes: string
+}
+
+interface Document {
+  id: string
+  student_id: string
+  file_name: string
+  file_path: string
+  description: string
+  uploaded_at: string
+  uploaded_by: string
+}
+
+interface StudentProfile {
+  student: StudentData
+  emergencyContacts: EmergencyContact[]
+  attendanceSummary: AttendanceSummary[]
+  registers: Register[]
+  academicProgress: AcademicProgress[]
+  achievements: Achievement[]
+  extracurricular: Extracurricular[]
+  agencies: Agency[]
+  documents: Document[]
 }
 
 function FlagImage({ flagCode, nationality }: { flagCode: string; nationality: string }) {
@@ -62,19 +177,92 @@ function FlagImage({ flagCode, nationality }: { flagCode: string; nationality: s
 }
 
 export default function StudentProfilePage({ params }: { params: { id: string } }) {
-  const student = students.find((s) => s.id === params.id)
+  const [studentProfile, setStudentProfile] = useState<StudentProfile | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  if (!student) {
-    return notFound()
+  useEffect(() => {
+    async function fetchStudentProfile() {
+      setIsLoading(true)
+      try {
+        const response = await fetch(`/api/students/${params.id}/full-profile`)
+        if (!response.ok) {
+          throw new Error('Failed to fetch student profile')
+        }
+        const data = await response.json()
+        
+        // More detailed logging to inspect the academic progress data
+        console.log('Academic progress data from API:', data.academicProgress);
+        console.log('Number of academic records:', data.academicProgress?.length || 0);
+        console.log('Academic subjects:', data.academicProgress?.map(prog => prog.subject).join(', '));
+        
+        setStudentProfile(data)
+      } catch (err) {
+        console.error('Error fetching student profile:', err)
+        setError('Failed to load student data')
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    fetchStudentProfile()
+  }, [params.id])
+
+  if (isLoading) {
+    return (
+      <div className="flex min-h-screen flex-col">
+        <SiteHeader />
+        <main className="flex-1 flex items-center justify-center">
+          <p>Loading student profile...</p>
+        </main>
+      </div>
+    )
   }
 
-  const studentIncidents = incidents.filter((incident) => incident.studentId === student.id)
-  const studentAgencies = student.agencies
-    .map((agencyId) => agencies.find((agency) => agency.id === agencyId))
-    .filter(Boolean)
+  if (error || !studentProfile) {
+    return (
+      <div className="flex min-h-screen flex-col">
+        <SiteHeader />
+        <main className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            <h2 className="text-xl font-bold">Error</h2>
+            <p>{error || 'Student not found'}</p>
+            <Button className="mt-4" asChild>
+              <Link href="/students">Back to Students</Link>
+            </Button>
+          </div>
+        </main>
+      </div>
+    )
+  }
 
-  const age = getAgeFromDOB(student.dateOfBirth)
-  const daysSinceLastIncident = student.lastIncidentDate ? daysSince(student.lastIncidentDate) : null
+  const { student } = studentProfile
+
+  // Get full address
+  const getFullAddress = (
+    line1: string,
+    line2: string,
+    town: string,
+    county: string,
+    postcode: string,
+    country: string
+  ) => {
+    return [line1, line2, town, county, postcode, country].filter(Boolean).join(", ")
+  }
+
+  const studentAddress = getFullAddress(
+    student.address_line_1,
+    student.address_line_2,
+    student.town,
+    student.county,
+    student.postcode,
+    student.country
+  )
+
+  // Process languages from string to array
+  const languagesArray = student.languages ? student.languages.split(",").map(lang => lang.trim()) : []
+
+  const age = getAgeFromDOB(student.date_of_birth)
 
   // Flag mapping for nationalities
   const flagMap: Record<string, string> = {
@@ -112,86 +300,31 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
     return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`
   }
 
-  // Generate mock attendance data
-  const attendanceData = {
-    present: 92,
-    authorizedAbsence: 5,
-    unauthorizedAbsence: 2,
-    late: 1,
-    weeklyAttendance: [
-      { day: "Monday", status: "Present" },
-      { day: "Tuesday", status: "Present" },
-      { day: "Wednesday", status: "Late" },
-      { day: "Thursday", status: "Present" },
-      { day: "Friday", status: "Present" },
-    ],
-    monthlyComparison: {
-      thisYear: 94,
-      lastYear: 91,
-    },
-    termlyAttendance: {
-      autumn: 95,
-      spring: 92,
-      summer: 89,
-    },
-  }
-
-  // Generate mock achievement data
-  const achievementData = {
-    subjects: [
-      { name: "English", predicted: "B", workingAt: "C", expected: "B" },
-      { name: "Mathematics", predicted: "A", workingAt: "A", expected: "A" },
-      { name: "Science", predicted: "B", workingAt: "B", expected: "B" },
-      { name: "History", predicted: "C", workingAt: "C", expected: "B" },
-      { name: "Geography", predicted: "B", workingAt: "B", expected: "B" },
-      { name: "Art", predicted: "A", workingAt: "A", expected: "A" },
-      { name: "Physical Education", predicted: "B", workingAt: "B", expected: "B" },
-      { name: "Computing", predicted: "A", workingAt: "B", expected: "A" },
-    ],
-    awards: [
-      { name: "Star of the Week", date: "2024-02-15", description: "Excellence in Mathematics" },
-      { name: "Sports Achievement", date: "2023-11-10", description: "Outstanding contribution to school sports" },
-    ],
-  }
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "resolved":
-        return "bg-green-100 text-green-800"
-      case "escalated":
-        return "bg-red-100 text-red-800"
-      case "in_progress":
-        return "bg-amber-100 text-amber-800"
-      default:
-        return "bg-blue-100 text-blue-800"
-    }
-  }
-
-  // Group incidents by year and month for timeline
-  const incidentsByYearMonth = studentIncidents.reduce(
-    (acc, incident) => {
-      const date = new Date(incident.incidentDate)
-      const year = date.getFullYear()
-      const month = date.getMonth()
-
-      if (!acc[year]) {
-        acc[year] = {}
+  // Create a weekly attendance structure from registers
+  const createWeeklyAttendance = (registers: Register[]) => {
+    const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
+    const weeklyData = days.map(day => {
+      const dayRegisters = registers.filter(r => {
+        const date = new Date(r.date)
+        const weekDay = date.getDay()
+        // Convert weekDay (0-6) to match our days array (0-4)
+        const adjustedDay = weekDay === 0 ? 6 : weekDay - 1
+        return adjustedDay === days.indexOf(day)
+      })
+      
+      // Get the most recent status for this day
+      if (dayRegisters.length > 0) {
+        // Sort by date descending
+        dayRegisters.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+        return { day, status: dayRegisters[0].status }
       }
+      return { day, status: 'N/A' }
+    })
+    return weeklyData
+  }
 
-      if (!acc[year][month]) {
-        acc[year][month] = []
-      }
-
-      acc[year][month].push(incident)
-      return acc
-    },
-    {} as Record<number, Record<number, Incident[]>>,
-  )
-
-  // Get unique years and sort them
-  const years = Object.keys(incidentsByYearMonth)
-    .map(Number)
-    .sort((a, b) => b - a)
+  // Get siblings data if any
+  const siblingIds = student.sibling_ids ? student.sibling_ids.split(',').filter(Boolean) : []
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -211,23 +344,23 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
                 <Avatar className="h-16 w-16">
                   <AvatarImage
                     src={`/placeholder.svg?height=64&width=64`}
-                    alt={`${student.firstName} ${student.lastName}`}
+                    alt={`${student.first_name} ${student.last_name}`}
                   />
-                  <AvatarFallback>{getInitials(student.firstName, student.lastName)}</AvatarFallback>
+                  <AvatarFallback>{getInitials(student.first_name, student.last_name)}</AvatarFallback>
                 </Avatar>
                 <div>
                   <div className="flex items-center gap-2">
                     <h1 className="text-2xl font-bold">
-                      {student.firstName} {student.lastName}
+                      {student.first_name} {student.last_name}
                     </h1>
-                    {student.hasConfidentialInformation && (
+                    {student.has_confidential_information === 1 && (
                       <span className="text-amber-500" title="Contains confidential information">
                         <AlertTriangle className="h-5 w-5" />
                       </span>
                     )}
                   </div>
                   <div className="flex items-center text-muted-foreground gap-2 mt-1">
-                    <span>{student.yearGroup}</span>
+                    <span>{student.year_group}</span>
                     <span>•</span>
                     <span>Tutor: {student.tutor}</span>
                     <span>•</span>
@@ -237,19 +370,13 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
               </div>
 
               <div className="flex flex-wrap gap-2">
-                <Badge variant="outline" className={getSafeguardingStatusColor(student.safeguardingStatus)}>
-                  {student.safeguardingStatus || "No safeguarding status"}
+                <Badge variant="outline" className={getSafeguardingStatusColor(student.safeguarding_status)}>
+                  {student.safeguarding_status || "No safeguarding status"}
                 </Badge>
 
-                {student.senStatus && student.senStatus !== "None" && (
+                {student.sen_status && student.sen_status !== "None" && (
                   <Badge variant="outline" className="bg-blue-100 text-blue-800">
-                    {student.senStatus}
-                  </Badge>
-                )}
-
-                {student.ehcpStatus && student.ehcpStatus !== "none" && (
-                  <Badge variant="outline" className="bg-purple-100 text-purple-800">
-                    EHCP: {student.ehcpStatus.replace(/_/g, " ")}
+                    {student.sen_status}
                   </Badge>
                 )}
               </div>
@@ -264,6 +391,7 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
               <TabsTrigger value="agencies">Agencies</TabsTrigger>
               <TabsTrigger value="attendance">Attendance</TabsTrigger>
               <TabsTrigger value="achievement">Achievement</TabsTrigger>
+              <TabsTrigger value="academic">Academic</TabsTrigger>
               <TabsTrigger value="documents">Documents</TabsTrigger>
             </TabsList>
 
@@ -279,31 +407,31 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
                         <p className="text-sm font-medium text-muted-foreground">Date of Birth</p>
                         <p className="flex items-center gap-2">
                           <Calendar className="h-4 w-4 text-muted-foreground" />
-                          {formatDate(student.dateOfBirth)} (Age: {age})
+                          {formatDate(student.date_of_birth)} (Age: {age})
                         </p>
                       </div>
                       <div className="space-y-1">
                         <p className="text-sm font-medium text-muted-foreground">Year Group</p>
                         <p className="flex items-center gap-2">
                           <Users className="h-4 w-4 text-muted-foreground" />
-                          {student.yearGroup}
+                          {student.year_group}
                         </p>
                       </div>
                       <div className="space-y-1">
                         <p className="text-sm font-medium text-muted-foreground">Tutor Group</p>
                         <p>{student.tutor}</p>
                       </div>
-                      {student.address && (
+                      {studentAddress && (
                         <div className="space-y-1">
                           <p className="text-sm font-medium text-muted-foreground">Address</p>
                           <a
-                            href={getGoogleMapsUrl(student.address)}
+                            href={getGoogleMapsUrl(studentAddress)}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="flex items-center gap-2 text-primary hover:underline"
                           >
                             <MapPin className="h-4 w-4 text-muted-foreground" />
-                            {student.address}
+                            {studentAddress}
                             <ExternalLink className="h-3 w-3" />
                           </a>
                         </div>
@@ -333,18 +461,13 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
                         <div className="flex items-center gap-2">
                           <Languages className="h-4 w-4 text-muted-foreground" />
                           <div>
-                            {student.languages && student.languages.length > 0 ? (
+                            {languagesArray.length > 0 ? (
                               <div className="flex flex-wrap gap-1">
-                                {student.languages.map((language) => (
+                                {languagesArray.map((language) => (
                                   <Badge key={language} variant="outline" className="bg-blue-50 text-blue-700">
                                     {language}
                                   </Badge>
                                 ))}
-                                {student.eal && (
-                                  <Badge variant="outline" className="bg-purple-50 text-purple-700">
-                                    EAL
-                                  </Badge>
-                                )}
                               </div>
                             ) : (
                               "Not recorded"
@@ -361,56 +484,24 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
                       <div className="grid gap-4 sm:grid-cols-2">
                         <div className="space-y-1">
                           <p className="text-sm font-medium text-muted-foreground">Safeguarding Status</p>
-                          <Badge variant="outline" className={getSafeguardingStatusColor(student.safeguardingStatus)}>
-                            {student.safeguardingStatus || "None"}
+                          <Badge variant="outline" className={getSafeguardingStatusColor(student.safeguarding_status)}>
+                            {student.safeguarding_status || "None"}
                           </Badge>
                         </div>
-                        {student.lastIncidentDate && (
-                          <div className="space-y-1">
-                            <p className="text-sm font-medium text-muted-foreground">Last Incident</p>
-                            <div className="flex items-center gap-2">
-                              <Clock className="h-4 w-4 text-muted-foreground" />
-                              <span>{formatDate(student.lastIncidentDate)}</span>
-                              {daysSinceLastIncident !== null && daysSinceLastIncident < 7 && (
-                                <Badge variant="outline" className="bg-amber-100 text-amber-800">
-                                  {daysSinceLastIncident} days ago
-                                </Badge>
-                              )}
-                            </div>
-                          </div>
-                        )}
                         <div className="space-y-1">
                           <p className="text-sm font-medium text-muted-foreground">SEN Status</p>
-                          <p>{student.senStatus || "None"}</p>
-                        </div>
-                        <div className="space-y-1">
-                          <p className="text-sm font-medium text-muted-foreground">EHCP Status</p>
-                          <p className="capitalize">{student.ehcpStatus?.replace(/_/g, " ") || "None"}</p>
+                          <p>{student.sen_status || "None"}</p>
                         </div>
                       </div>
                     </div>
 
-                    {student.siblings && student.siblings.length > 0 && (
+                    {siblingIds.length > 0 && (
                       <>
                         <Separator />
-
                         <div>
                           <h3 className="font-medium mb-2">Siblings</h3>
                           <div className="space-y-2">
-                            {student.siblings.map((siblingId) => {
-                              const sibling = students.find((s) => s.id === siblingId)
-                              return sibling ? (
-                                <div key={siblingId} className="flex items-center gap-2">
-                                  <Avatar className="h-6 w-6">
-                                    <AvatarFallback>{getInitials(sibling.firstName, sibling.lastName)}</AvatarFallback>
-                                  </Avatar>
-                                  <Link href={`/students/${siblingId}`} className="hover:underline">
-                                    {sibling.firstName} {sibling.lastName}
-                                  </Link>
-                                  <span className="text-sm text-muted-foreground">{sibling.yearGroup}</span>
-                                </div>
-                              ) : null
-                            })}
+                            <p className="text-sm text-muted-foreground">To view sibling info, please use the student search feature</p>
                           </div>
                         </div>
                       </>
@@ -425,17 +516,15 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
                     </CardHeader>
                     <CardContent>
                       <div className="space-y-4">
-                        {studentIncidents.length > 0 ? (
-                          studentIncidents.slice(0, 3).map((incident) => (
-                            <div key={incident.id} className="flex items-start gap-2">
+                        {studentProfile.registers.length > 0 ? (
+                          studentProfile.registers.slice(0, 3).map((register, idx) => (
+                            <div key={`${register.student_id}-${register.date}-${register.session}`} className="flex items-start gap-2">
                               <div className="rounded-full bg-primary/10 p-1">
-                                <FileText className="h-4 w-4 text-primary" />
+                                <Clock className="h-4 w-4 text-primary" />
                               </div>
                               <div>
-                                <Link href={`/incidents/${incident.id}`} className="font-medium hover:underline">
-                                  {incident.category} incident reported
-                                </Link>
-                                <p className="text-sm text-muted-foreground">{formatDateTime(incident.reportDate)}</p>
+                                <p className="font-medium">{register.status} ({register.session})</p>
+                                <p className="text-sm text-muted-foreground">{formatDate(register.date)}</p>
                               </div>
                             </div>
                           ))
@@ -489,58 +578,65 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-6">
-                    {student.emergencyContacts.map((contact) => (
-                      <div key={contact.id} className="border rounded-lg p-4 space-y-4">
-                        <div className="flex items-start justify-between">
-                          <div>
-                            <h3 className="text-lg font-medium">{contact.name}</h3>
-                            <p className="text-sm text-muted-foreground">{contact.relationship}</p>
-                          </div>
-                          {contact.isRisk && (
-                            <Badge variant="outline" className="bg-red-100 text-red-800">
-                              Risk Indicator
-                            </Badge>
-                          )}
-                        </div>
-
-                        <div className="grid gap-4 sm:grid-cols-2">
-                          <div className="space-y-1">
-                            <p className="text-sm font-medium text-muted-foreground">Phone</p>
-                            <p className="flex items-center gap-2">
-                              <Phone className="h-4 w-4 text-muted-foreground" />
-                              {contact.phone}
-                            </p>
-                          </div>
-                          {contact.email && (
-                            <div className="space-y-1">
-                              <p className="text-sm font-medium text-muted-foreground">Email</p>
-                              <p>{contact.email}</p>
+                    {studentProfile.emergencyContacts.length > 0 ? (
+                      studentProfile.emergencyContacts.map((contact) => {
+                        const contactAddress = getFullAddress(
+                          contact.address_line_1,
+                          contact.address_line_2,
+                          contact.town,
+                          contact.county,
+                          contact.postcode,
+                          contact.country
+                        )
+                        
+                        return (
+                          <div key={contact.id} className="border rounded-lg p-4 space-y-4">
+                            <div className="flex items-start justify-between">
+                              <div>
+                                <h3 className="text-lg font-medium">{contact.first_name} {contact.last_name}</h3>
+                                <p className="text-sm text-muted-foreground">{contact.relationship}</p>
+                              </div>
                             </div>
-                          )}
-                          {contact.address && (
-                            <div className="space-y-1 sm:col-span-2">
-                              <p className="text-sm font-medium text-muted-foreground">Address</p>
-                              <a
-                                href={getGoogleMapsUrl(contact.address)}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="flex items-center gap-2 text-primary hover:underline"
-                              >
-                                <MapPin className="h-4 w-4 text-muted-foreground" />
-                                {contact.address}
-                                <ExternalLink className="h-3 w-3" />
-                              </a>
-                            </div>
-                          )}
-                        </div>
 
-                        {contact.isRisk && contact.riskNotes && (
-                          <div className="p-2 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-md text-sm">
-                            <strong>Risk Notes:</strong> {contact.riskNotes}
+                            <div className="grid gap-4 sm:grid-cols-2">
+                              <div className="space-y-1">
+                                <p className="text-sm font-medium text-muted-foreground">Phone</p>
+                                <p className="flex items-center gap-2">
+                                  <Phone className="h-4 w-4 text-muted-foreground" />
+                                  {contact.phone}
+                                </p>
+                              </div>
+                              {contact.email && (
+                                <div className="space-y-1">
+                                  <p className="text-sm font-medium text-muted-foreground">Email</p>
+                                  <p>{contact.email}</p>
+                                </div>
+                              )}
+                              {contactAddress && (
+                                <div className="space-y-1 sm:col-span-2">
+                                  <p className="text-sm font-medium text-muted-foreground">Address</p>
+                                  <a
+                                    href={getGoogleMapsUrl(contactAddress)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex items-center gap-2 text-primary hover:underline"
+                                  >
+                                    <MapPin className="h-4 w-4 text-muted-foreground" />
+                                    {contactAddress}
+                                    <ExternalLink className="h-3 w-3" />
+                                  </a>
+                                </div>
+                              )}
+                            </div>
                           </div>
-                        )}
+                        )
+                      })
+                    ) : (
+                      <div className="py-12 text-center text-muted-foreground">
+                        <p>No emergency contacts recorded for this student</p>
+                        <Button className="mt-4">Add Emergency Contact</Button>
                       </div>
-                    ))}
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -558,76 +654,85 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
                   </Button>
                 </CardHeader>
                 <CardContent>
-                  {studentAgencies.length > 0 ? (
+                  {studentProfile.agencies.length > 0 ? (
                     <div className="space-y-6">
-                      {studentAgencies.map((agency) => (
-                        <div key={agency!.id} className="border rounded-lg p-4 space-y-4">
-                          <div>
-                            <h3 className="text-lg font-medium">{agency!.name}</h3>
-                            <p className="text-sm text-muted-foreground">{agency!.details}</p>
-                          </div>
+                      {studentProfile.agencies.map((agency) => {
+                        const agencyAddress = getFullAddress(
+                          agency.address_line_1,
+                          agency.address_line_2,
+                          agency.town,
+                          agency.county,
+                          agency.postcode,
+                          agency.country
+                        )
+                        
+                        return (
+                          <div key={agency.id} className="border rounded-lg p-4 space-y-4">
+                            <div>
+                              <h3 className="text-lg font-medium">{agency.agency_name}</h3>
+                              <p className="text-sm text-muted-foreground">{agency.notes}</p>
+                            </div>
 
-                          <div className="grid gap-4 sm:grid-cols-2">
-                            {agency!.phone && (
-                              <div className="space-y-1">
-                                <p className="text-sm font-medium text-muted-foreground">Phone</p>
-                                <p className="flex items-center gap-2">
-                                  <Phone className="h-4 w-4 text-muted-foreground" />
-                                  {agency!.phone}
-                                </p>
-                              </div>
-                            )}
-                            {agency!.email && (
-                              <div className="space-y-1">
-                                <p className="text-sm font-medium text-muted-foreground">Email</p>
-                                <p>{agency!.email}</p>
-                              </div>
-                            )}
-                            {agency!.address && (
-                              <div className="space-y-1 sm:col-span-2">
-                                <p className="text-sm font-medium text-muted-foreground">Address</p>
-                                <a
-                                  href={getGoogleMapsUrl(agency!.address)}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="flex items-center gap-2 text-primary hover:underline"
-                                >
-                                  <MapPin className="h-4 w-4 text-muted-foreground" />
-                                  {agency!.address}
-                                  <ExternalLink className="h-3 w-3" />
-                                </a>
-                              </div>
-                            )}
-                          </div>
+                            <div className="grid gap-4 sm:grid-cols-2">
+                              {agency.contact_phone && (
+                                <div className="space-y-1">
+                                  <p className="text-sm font-medium text-muted-foreground">Phone</p>
+                                  <p className="flex items-center gap-2">
+                                    <Phone className="h-4 w-4 text-muted-foreground" />
+                                    {agency.contact_phone}
+                                  </p>
+                                </div>
+                              )}
+                              {agency.contact_email && (
+                                <div className="space-y-1">
+                                  <p className="text-sm font-medium text-muted-foreground">Email</p>
+                                  <p>{agency.contact_email}</p>
+                                </div>
+                              )}
+                              {agencyAddress && (
+                                <div className="space-y-1 sm:col-span-2">
+                                  <p className="text-sm font-medium text-muted-foreground">Address</p>
+                                  <a
+                                    href={getGoogleMapsUrl(agencyAddress)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex items-center gap-2 text-primary hover:underline"
+                                  >
+                                    <MapPin className="h-4 w-4 text-muted-foreground" />
+                                    {agencyAddress}
+                                    <ExternalLink className="h-3 w-3" />
+                                  </a>
+                                </div>
+                              )}
+                            </div>
 
-                          {agency!.contacts && agency!.contacts.length > 0 && (
-                            <>
-                              <Separator />
-                              <div>
-                                <h4 className="font-medium mb-2">Contacts</h4>
-                                <div className="space-y-3">
-                                  {agency!.contacts.map((contact) => (
-                                    <div key={contact.id} className="flex items-start gap-2 p-2 bg-muted rounded-md">
+                            {agency.contact_name && (
+                              <>
+                                <Separator />
+                                <div>
+                                  <h4 className="font-medium mb-2">Contact</h4>
+                                  <div className="space-y-3">
+                                    <div className="flex items-start gap-2 p-2 bg-muted rounded-md">
                                       <Avatar className="h-8 w-8">
                                         <AvatarFallback>
-                                          {getInitials(contact.name.split(" ")[0], contact.name.split(" ")[1] || "")}
+                                          {getInitials(agency.contact_name.split(" ")[0], agency.contact_name.split(" ")[1] || "")}
                                         </AvatarFallback>
                                       </Avatar>
                                       <div>
-                                        <p className="font-medium">{contact.name}</p>
+                                        <p className="font-medium">{agency.contact_name}</p>
                                         <div className="text-sm text-muted-foreground">
-                                          {contact.role && <span>{contact.role} • </span>}
-                                          {contact.phone && <span>{contact.phone}</span>}
+                                          {agency.contact_role && <span>{agency.contact_role} • </span>}
+                                          {agency.contact_phone && <span>{agency.contact_phone}</span>}
                                         </div>
                                       </div>
                                     </div>
-                                  ))}
+                                  </div>
                                 </div>
-                              </div>
-                            </>
-                          )}
-                        </div>
-                      ))}
+                              </>
+                            )}
+                          </div>
+                        )
+                      })}
                     </div>
                   ) : (
                     <div className="py-12 text-center text-muted-foreground">
@@ -640,11 +745,22 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
             </TabsContent>
 
             <TabsContent value="attendance">
-              <AttendanceTab studentId={student.id} />
+              <AttendanceTab 
+                studentId={student.id} 
+                initialRegisters={studentProfile.registers} 
+                initialAttendanceSummary={studentProfile.attendanceSummary} 
+              />
             </TabsContent>
 
             <TabsContent value="achievement">
               <AchievementTab studentId={student.id} />
+            </TabsContent>
+            
+            <TabsContent value="academic">
+              <AcademicTab 
+                studentId={student.id}
+                initialAcademicProgress={studentProfile.academicProgress}
+              />
             </TabsContent>
 
             <TabsContent value="documents">
@@ -654,10 +770,36 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
                   <CardDescription>Student documents and attachments</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="py-12 text-center text-muted-foreground">
-                    <p>No documents uploaded for this student</p>
-                    <Button className="mt-4">Upload Document</Button>
-                  </div>
+                  {studentProfile.documents.length > 0 ? (
+                    <div className="space-y-4">
+                      {studentProfile.documents.map((doc) => (
+                        <div key={doc.id} className="flex items-center justify-between p-3 border rounded-md">
+                          <div className="flex items-center gap-3">
+                            <div className="rounded-full bg-primary/10 p-2">
+                              <FileText className="h-4 w-4 text-primary" />
+                            </div>
+                            <div>
+                              <p className="font-medium">{doc.file_name}</p>
+                              <p className="text-sm text-muted-foreground">
+                                {doc.description} • {formatDate(doc.uploaded_at)}
+                              </p>
+                            </div>
+                          </div>
+                          <Button size="sm" variant="outline" asChild>
+                            <Link href={doc.file_path} target="_blank">View</Link>
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="py-12 text-center text-muted-foreground">
+                      <p>No documents uploaded for this student</p>
+                      <Button className="mt-4">
+                        <Upload className="mr-2 h-4 w-4" />
+                        Upload Document
+                      </Button>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </TabsContent>
@@ -667,4 +809,3 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
     </div>
   )
 }
-
