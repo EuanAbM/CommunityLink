@@ -3,7 +3,7 @@
 import Link from "next/link"
 import Image from "next/image"
 import { notFound } from "next/navigation"
-import { useState, useEffect } from "react"
+import { useState, useEffect, use } from "react"
 import { SiteHeader } from "@/components/layout/site-header"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -35,7 +35,9 @@ import {
   ExternalLink,
   Upload,
   UploadCloud,
+  Loader2
 } from "lucide-react"
+import { useToast } from "@/components/ui/use-toast"
 import { AttendanceTab } from "@/components/students/attendance-tab"
 import { IncidentsTab } from "./incidents-tab"
 import { AcademicTab } from "./academic-tab"
@@ -159,26 +161,39 @@ function FlagImage({ flagCode, nationality }: { flagCode: string; nationality: s
   )
 }
 
+// Helper function to format address fields into a single string
+const getFullAddress = (
+  line1: string,
+  line2: string,
+  town: string,
+  county: string,
+  postcode: string,
+  country: string
+) => {
+  return [line1, line2, town, county, postcode, country].filter(Boolean).join(", ")
+}
+
 export default function StudentProfilePage({ params }: { params: { id: string } }) {
+  const unwrappedParams = use(params);
   const [studentProfile, setStudentProfile] = useState<StudentProfile | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isDialogOpen, setIsDialogOpen] = useState(false)
+  const { toast } = useToast()
 
   useEffect(() => {
     async function fetchStudentProfile() {
       setIsLoading(true)
       try {
-        const response = await fetch(`/api/students/${params.id}/full-profile`)
+        const response = await fetch(`/api/students/${unwrappedParams.id}/full-profile`)
         if (!response.ok) {
           throw new Error('Failed to fetch student profile')
         }
         const data = await response.json()
-        
-        // More detailed logging to inspect the academic progress data
-        console.log('Academic progress data from API:', data.academicProgress);
         console.log('Number of academic records:', data.academicProgress?.length || 0);
+        console.log('Academic progress data from API:', data.academicProgress);
         console.log('Academic subjects:', data.academicProgress?.map(prog => prog.subject).join(', '));
-        
         setStudentProfile(data)
       } catch (err) {
         console.error('Error fetching student profile:', err)
@@ -189,11 +204,9 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
     }
 
     fetchStudentProfile()
-  }, [params.id])
+  }, [unwrappedParams.id])
 
-  // Instead of showing a simple loading message, let the loading.tsx file handle the loading state
   if (isLoading) {
-    // This will automatically use the loading.tsx file
     return null;
   }
 
@@ -217,17 +230,6 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
   const { student } = studentProfile
 
   // Get full address
-  const getFullAddress = (
-    line1: string,
-    line2: string,
-    town: string,
-    county: string,
-    postcode: string,
-    country: string
-  ) => {
-    return [line1, line2, town, county, postcode, country].filter(Boolean).join(", ")
-  }
-
   const studentAddress = getFullAddress(
     student.address_line_1,
     student.address_line_2,
@@ -240,6 +242,7 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
   // Process languages from string to array
   const languagesArray = student.languages ? student.languages.split(",").map(lang => lang.trim()) : []
 
+  // Get age from date of birth
   const age = getAgeFromDOB(student.date_of_birth)
 
   // Flag mapping for nationalities
@@ -266,9 +269,9 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
     "New Zealander": "nz",
     "South African": "za",
     Brazilian: "br",
-    Mexican: "mx",
-    Turkish: "tr",
     Russian: "ru",
+    Mexican: "mx",
+    Turkish: "tr"
   }
 
   const flagCode = student.nationality && flagMap[student.nationality] ? flagMap[student.nationality] : "gb"
@@ -295,8 +298,9 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
         // Sort by date descending
         dayRegisters.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
         return { day, status: dayRegisters[0].status }
+      } else {
+        return { day, status: 'N/A' }
       }
-      return { day, status: 'N/A' }
     })
     return weeklyData
   }
@@ -316,7 +320,6 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
                 Back to Students
               </Link>
             </Button>
-
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
               <div className="flex items-center gap-4">
                 <Avatar className="h-16 w-16">
@@ -340,23 +343,21 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
                   <div className="flex items-center text-muted-foreground gap-2 mt-1">
                     <span>{student.year_group}</span>
                     <span>•</span>
-                    <span>Tutor: {student.tutor}</span>
-                    <span>•</span>
                     <span>Age: {age}</span>
+                    <span>•</span>
+                    <span>Tutor: {student.tutor}</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Badge variant="outline" className={getSafeguardingStatusColor(student.safeguarding_status)}>
+                      {student.safeguarding_status || "No safeguarding status"}
+                    </Badge>
+                    {student.sen_status && student.sen_status !== "None" && (
+                      <Badge variant="outline" className="bg-blue-100 text-blue-800">
+                        {student.sen_status}
+                      </Badge>
+                    )}
                   </div>
                 </div>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                <Badge variant="outline" className={getSafeguardingStatusColor(student.safeguarding_status)}>
-                  {student.safeguarding_status || "No safeguarding status"}
-                </Badge>
-
-                {student.sen_status && student.sen_status !== "None" && (
-                  <Badge variant="outline" className="bg-blue-100 text-blue-800">
-                    {student.sen_status}
-                  </Badge>
-                )}
               </div>
             </div>
           </div>
@@ -401,10 +402,9 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
                       {studentAddress && (
                         <div className="space-y-1">
                           <p className="text-sm font-medium text-muted-foreground">Address</p>
-                          <a
+                          <a rel="noopener noreferrer"
                             href={getGoogleMapsUrl(studentAddress)}
                             target="_blank"
-                            rel="noopener noreferrer"
                             className="flex items-center gap-2 text-primary hover:underline"
                           >
                             <MapPin className="h-4 w-4 text-muted-foreground" />
@@ -592,10 +592,9 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
                               {contactAddress && (
                                 <div className="space-y-1 sm:col-span-2">
                                   <p className="text-sm font-medium text-muted-foreground">Address</p>
-                                  <a
+                                  <a rel="noopener noreferrer"
                                     href={getGoogleMapsUrl(contactAddress)}
                                     target="_blank"
-                                    rel="noopener noreferrer"
                                     className="flex items-center gap-2 text-primary hover:underline"
                                   >
                                     <MapPin className="h-4 w-4 text-muted-foreground" />
@@ -621,8 +620,8 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
 
             <TabsContent value="agencies">
               <Card>
-                <CardHeader className="flex flex-row items-center">
-                  <div className="grid gap-2">
+                <CardHeader className="flex flex-row items-center justify-between">
+                  <div>
                     <CardTitle>Agency Involvement</CardTitle>
                     <CardDescription>External agencies involved with this student</CardDescription>
                   </div>
@@ -631,9 +630,9 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
                   </Button>
                 </CardHeader>
                 <CardContent>
-                  {studentProfile.agencies.length > 0 ? (
-                    <div className="space-y-6">
-                      {studentProfile.agencies.map((agency) => {
+                  <div className="space-y-6">
+                    {studentProfile.agencies.length > 0 ? (
+                      studentProfile.agencies.map((agency) => {
                         const agencyAddress = getFullAddress(
                           agency.address_line_1,
                           agency.address_line_2,
@@ -669,10 +668,9 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
                               {agencyAddress && (
                                 <div className="space-y-1 sm:col-span-2">
                                   <p className="text-sm font-medium text-muted-foreground">Address</p>
-                                  <a
+                                  <a rel="noopener noreferrer"
                                     href={getGoogleMapsUrl(agencyAddress)}
                                     target="_blank"
-                                    rel="noopener noreferrer"
                                     className="flex items-center gap-2 text-primary hover:underline"
                                   >
                                     <MapPin className="h-4 w-4 text-muted-foreground" />
@@ -709,14 +707,14 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
                             )}
                           </div>
                         )
-                      })}
-                    </div>
-                  ) : (
-                    <div className="py-12 text-center text-muted-foreground">
-                      <p>No agencies currently involved with this student</p>
-                      <Button className="mt-4">Add Agency Involvement</Button>
-                    </div>
-                  )}
+                      })
+                    ) : (
+                      <div className="py-12 text-center text-muted-foreground">
+                        <p>No agencies currently involved with this student</p>
+                        <Button className="mt-4">Add Agency Involvement</Button>
+                      </div>
+                    )}
+                  </div>
                 </CardContent>
               </Card>
             </TabsContent>
@@ -728,101 +726,147 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
                 initialAttendanceSummary={studentProfile.attendanceSummary} 
               />
             </TabsContent>
-            
+
             <TabsContent value="academic">
-              <AcademicTab
+              <AcademicTab 
                 studentId={student.id}
                 initialAcademicProgress={studentProfile.academicProgress}
               />
             </TabsContent>
 
             <TabsContent value="documents">
-  <Card>
-    <CardHeader className="flex flex-row items-center justify-between">
-      <div>
-        <CardTitle>Documents</CardTitle>
-        <CardDescription>Student documents and attachments</CardDescription>
-      </div>
-      <Dialog>
-        <DialogTrigger asChild>
-          <Button size="sm">
-            <UploadCloud className="mr-2 h-4 w-4" />
-            Upload Document
-          </Button>
-        </DialogTrigger>
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between">
+                  <div>
+                    <CardTitle>Documents</CardTitle>
+                    <CardDescription>Student documents and attachments</CardDescription>
+                  </div>
+                  <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+                    <DialogTrigger asChild>
+                      <Button size="sm">
+                        <UploadCloud className="mr-2 h-4 w-4" />
+                        Upload Document
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-lg">
+                      <DialogHeader>
+                        <DialogTitle>Upload Document</DialogTitle>
+                        <DialogDescription>Attach a new document to this student's profile.</DialogDescription>
+                      </DialogHeader>
+                      <form id="upload-form" className="grid gap-4" onSubmit={async (e) => {
+                        e.preventDefault();
+                        setIsSubmitting(true);
+                        const form = e.currentTarget;
+                        const formData = new FormData(form);
+                        try {
+                          const response = await fetch(`/api/students/${student.id}/documents`, {
+                            method: 'POST',
+                            body: formData,
+                          });
+                          
+                          // Check status and handle response more carefully
+                          if (!response.ok) {
+                            const errorData = await response.json().catch(() => ({}));
+                            throw new Error(errorData.error || `Server responded with status: ${response.status}`);
+                          }
+                      
+                          const newDocument = await response.json();
+                          setStudentProfile((prevState) => {
+                            if (!prevState) return prevState;
+                            return {
+                              ...prevState,
+                              documents: [...prevState.documents, newDocument]
+                            };
+                          });
+                          toast({
+                            title: "Success",
+                            description: "Document has been successfully uploaded.",
+                          });
+                          setIsDialogOpen(false);
+                        } catch (err) {
+                          console.error('Error uploading document:', err);
+                          toast({
+                            title: "Error",
+                            description: err.message || "Failed to upload document",
+                            variant: "destructive",
+                          });
+                        } finally {
+                          setIsSubmitting(false);
+                        }
+                      }}>
+                        <Input name="title" placeholder="Document Title" required />
+                        <Textarea name="description" placeholder="Optional description..." />
+                        <div className="border border-dashed rounded-md p-6 text-center">
+                          <p className="text-sm text-muted-foreground mb-2">Drag and drop or click to upload</p>
+                          <Input type="file" name="file" accept=".pdf,.doc,.docx,.jpg,.png" required />
+                        </div>
+                        <DialogFooter className="mt-2">
+                          <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
+                            Cancel
+                          </Button>
+                          <Button type="submit" disabled={isSubmitting}>
+                            {isSubmitting ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Uploading...
+                              </>
+                            ) : "Upload Document"}
+                          </Button>
+                        </DialogFooter>
+                      </form>
+                    </DialogContent>
+                  </Dialog>
+                </CardHeader>
 
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Upload Document</DialogTitle>
-            <DialogDescription>Attach a new document to this student's profile.</DialogDescription>
-          </DialogHeader>
-
-          <form id="upload-form" className="grid gap-4">
-            <Input id="title" placeholder="Document Title" required />
-            <Textarea id="description" placeholder="Optional description..." />
-
-            <div className="border border-dashed rounded-md p-6 text-center">
-              <p className="text-sm text-muted-foreground mb-2">Drag and drop or click to upload</p>
-              <Input type="file" accept=".pdf,.doc,.docx,.jpg,.png" />
-            </div>
-          </form>
-
-          <DialogFooter>
-            <Button type="submit" form="upload-form">Upload</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </CardHeader>
-
-    <CardContent>
-      {studentProfile.documents.length > 0 ? (
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-sm border rounded-md">
-            <thead className="bg-muted border-b text-left">
-              <tr>
-                <th className="px-4 py-2">Title</th>
-                <th className="px-4 py-2">Description</th>
-                <th className="px-4 py-2">Type</th>
-                <th className="px-4 py-2">Uploaded By</th>
-                <th className="px-4 py-2">Date</th>
-                <th className="px-4 py-2 text-right">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {studentProfile.documents.map((doc) => (
-                <tr key={doc.id} className="border-b hover:bg-muted/50">
-                  <td className="px-4 py-2 font-medium">{doc.file_name}</td>
-                  <td className="px-4 py-2 text-muted-foreground">{doc.description || "—"}</td>
-                  <td className="px-4 py-2">{doc.file_type || "—"}</td>
-                  <td className="px-4 py-2 flex items-center gap-2">
-                    <Avatar className="h-6 w-6">
-                      <AvatarFallback>
-                        {doc.uploaded_by ? doc.uploaded_by[0].toUpperCase() : "?"}
-                      </AvatarFallback>
-                    </Avatar>
-                    <span>{doc.uploaded_by || "Unknown"}</span>
-                  </td>
-                  <td className="px-4 py-2 text-xs text-muted-foreground whitespace-nowrap">
-                    {formatDate(doc.uploaded_at)}
-                  </td>
-                  <td className="px-4 py-2 text-right">
-                    <Button size="sm" variant="outline" asChild>
-                      <Link href={doc.file_path} target="_blank">View</Link>
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <div className="py-12 text-center text-muted-foreground">
-          <p>No documents uploaded for this student</p>
-        </div>
-      )}
-    </CardContent>
-  </Card>
-</TabsContent>
+                <CardContent>
+                  {studentProfile.documents.length > 0 ? (
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full text-sm border rounded-md">
+                        <thead className="bg-muted border-b text-left">
+                          <tr>
+                            <th className="px-4 py-2">Title</th>
+                            <th className="px-4 py-2">Description</th>
+                            <th className="px-4 py-2">Type</th>
+                            <th className="px-4 py-2">Uploaded By</th>
+                            <th className="px-4 py-2">Date</th>
+                            <th className="px-4 py-2 text-right">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {studentProfile.documents.map((doc) => (
+                            <tr key={doc.id} className="border-b hover:bg-muted/50">
+                              <td className="px-4 py-2 font-medium">{doc.file_name}</td>
+                              <td className="px-4 py-2 text-muted-foreground">{doc.description || "—"}</td>
+                              <td className="px-4 py-2">{doc.file_type || "—"}</td>
+                              <td className="px-4 py-2 flex items-center gap-2">
+                                <Avatar className="h-6 w-6">
+                                  <AvatarFallback>
+                                    {doc.uploaded_by ? doc.uploaded_by[0].toUpperCase() : "?"}
+                                  </AvatarFallback>
+                                </Avatar>
+                                <span>{doc.uploaded_by || "Unknown"}</span>
+                              </td>
+                              <td className="px-4 py-2 text-xs text-muted-foreground whitespace-nowrap">
+                                {formatDate(doc.uploaded_at)}
+                              </td>
+                              <td className="px-4 py-2 text-right">
+                                <Button size="sm" variant="outline" asChild>
+                                  <Link href={doc.file_path} target="_blank">View</Link>
+                                </Button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="py-12 text-center text-muted-foreground">
+                      <p>No documents uploaded for this student</p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
 
           </Tabs>
         </div>
