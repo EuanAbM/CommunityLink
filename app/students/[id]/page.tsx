@@ -11,6 +11,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import {
   formatDate,
   formatDateTime,
@@ -31,9 +34,9 @@ import {
   Users,
   ExternalLink,
   Upload,
+  UploadCloud,
 } from "lucide-react"
 import { AttendanceTab } from "@/components/students/attendance-tab"
-import { AchievementTab } from "@/components/students/achievement-tab"
 import { IncidentsTab } from "./incidents-tab"
 import { AcademicTab } from "./academic-tab"
 
@@ -106,25 +109,6 @@ interface AcademicProgress {
   updated_at: string
 }
 
-interface Achievement {
-  id: string
-  student_id: string
-  title: string
-  description: string
-  date: string
-  awarded_by: string
-}
-
-interface Extracurricular {
-  id: string
-  student_id: string
-  activity_name: string
-  role: string
-  description: string
-  start_date: string
-  end_date: string | null
-}
-
 interface Agency {
   id: string
   student_id: string
@@ -150,6 +134,7 @@ interface Document {
   description: string
   uploaded_at: string
   uploaded_by: string
+  file_type?: string
 }
 
 interface StudentProfile {
@@ -158,8 +143,6 @@ interface StudentProfile {
   attendanceSummary: AttendanceSummary[]
   registers: Register[]
   academicProgress: AcademicProgress[]
-  achievements: Achievement[]
-  extracurricular: Extracurricular[]
   agencies: Agency[]
   documents: Document[]
 }
@@ -208,15 +191,10 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
     fetchStudentProfile()
   }, [params.id])
 
+  // Instead of showing a simple loading message, let the loading.tsx file handle the loading state
   if (isLoading) {
-    return (
-      <div className="flex min-h-screen flex-col">
-        <SiteHeader />
-        <main className="flex-1 flex items-center justify-center">
-          <p>Loading student profile...</p>
-        </main>
-      </div>
-    )
+    // This will automatically use the loading.tsx file
+    return null;
   }
 
   if (error || !studentProfile) {
@@ -390,7 +368,6 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
               <TabsTrigger value="contacts">Contacts</TabsTrigger>
               <TabsTrigger value="agencies">Agencies</TabsTrigger>
               <TabsTrigger value="attendance">Attendance</TabsTrigger>
-              <TabsTrigger value="achievement">Achievement</TabsTrigger>
               <TabsTrigger value="academic">Academic</TabsTrigger>
               <TabsTrigger value="documents">Documents</TabsTrigger>
             </TabsList>
@@ -751,58 +728,102 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
                 initialAttendanceSummary={studentProfile.attendanceSummary} 
               />
             </TabsContent>
-
-            <TabsContent value="achievement">
-              <AchievementTab studentId={student.id} />
-            </TabsContent>
             
             <TabsContent value="academic">
-              <AcademicTab 
+              <AcademicTab
                 studentId={student.id}
                 initialAcademicProgress={studentProfile.academicProgress}
               />
             </TabsContent>
 
             <TabsContent value="documents">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Documents</CardTitle>
-                  <CardDescription>Student documents and attachments</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {studentProfile.documents.length > 0 ? (
-                    <div className="space-y-4">
-                      {studentProfile.documents.map((doc) => (
-                        <div key={doc.id} className="flex items-center justify-between p-3 border rounded-md">
-                          <div className="flex items-center gap-3">
-                            <div className="rounded-full bg-primary/10 p-2">
-                              <FileText className="h-4 w-4 text-primary" />
-                            </div>
-                            <div>
-                              <p className="font-medium">{doc.file_name}</p>
-                              <p className="text-sm text-muted-foreground">
-                                {doc.description} • {formatDate(doc.uploaded_at)}
-                              </p>
-                            </div>
-                          </div>
-                          <Button size="sm" variant="outline" asChild>
-                            <Link href={doc.file_path} target="_blank">View</Link>
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="py-12 text-center text-muted-foreground">
-                      <p>No documents uploaded for this student</p>
-                      <Button className="mt-4">
-                        <Upload className="mr-2 h-4 w-4" />
-                        Upload Document
-                      </Button>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </TabsContent>
+  <Card>
+    <CardHeader className="flex flex-row items-center justify-between">
+      <div>
+        <CardTitle>Documents</CardTitle>
+        <CardDescription>Student documents and attachments</CardDescription>
+      </div>
+      <Dialog>
+        <DialogTrigger asChild>
+          <Button size="sm">
+            <UploadCloud className="mr-2 h-4 w-4" />
+            Upload Document
+          </Button>
+        </DialogTrigger>
+
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Upload Document</DialogTitle>
+            <DialogDescription>Attach a new document to this student's profile.</DialogDescription>
+          </DialogHeader>
+
+          <form id="upload-form" className="grid gap-4">
+            <Input id="title" placeholder="Document Title" required />
+            <Textarea id="description" placeholder="Optional description..." />
+
+            <div className="border border-dashed rounded-md p-6 text-center">
+              <p className="text-sm text-muted-foreground mb-2">Drag and drop or click to upload</p>
+              <Input type="file" accept=".pdf,.doc,.docx,.jpg,.png" />
+            </div>
+          </form>
+
+          <DialogFooter>
+            <Button type="submit" form="upload-form">Upload</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </CardHeader>
+
+    <CardContent>
+      {studentProfile.documents.length > 0 ? (
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm border rounded-md">
+            <thead className="bg-muted border-b text-left">
+              <tr>
+                <th className="px-4 py-2">Title</th>
+                <th className="px-4 py-2">Description</th>
+                <th className="px-4 py-2">Type</th>
+                <th className="px-4 py-2">Uploaded By</th>
+                <th className="px-4 py-2">Date</th>
+                <th className="px-4 py-2 text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {studentProfile.documents.map((doc) => (
+                <tr key={doc.id} className="border-b hover:bg-muted/50">
+                  <td className="px-4 py-2 font-medium">{doc.file_name}</td>
+                  <td className="px-4 py-2 text-muted-foreground">{doc.description || "—"}</td>
+                  <td className="px-4 py-2">{doc.file_type || "—"}</td>
+                  <td className="px-4 py-2 flex items-center gap-2">
+                    <Avatar className="h-6 w-6">
+                      <AvatarFallback>
+                        {doc.uploaded_by ? doc.uploaded_by[0].toUpperCase() : "?"}
+                      </AvatarFallback>
+                    </Avatar>
+                    <span>{doc.uploaded_by || "Unknown"}</span>
+                  </td>
+                  <td className="px-4 py-2 text-xs text-muted-foreground whitespace-nowrap">
+                    {formatDate(doc.uploaded_at)}
+                  </td>
+                  <td className="px-4 py-2 text-right">
+                    <Button size="sm" variant="outline" asChild>
+                      <Link href={doc.file_path} target="_blank">View</Link>
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="py-12 text-center text-muted-foreground">
+          <p>No documents uploaded for this student</p>
+        </div>
+      )}
+    </CardContent>
+  </Card>
+</TabsContent>
+
           </Tabs>
         </div>
       </main>
