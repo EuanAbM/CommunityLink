@@ -70,7 +70,7 @@ export function IncidentReportForm() {
   ]
 
   const locations = [
-    "Classroom",
+    "C1m",
     "Playground",
     "Hallway",
     "Cafeteria",
