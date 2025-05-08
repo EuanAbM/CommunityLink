@@ -54,39 +54,68 @@ export default function TestFormPage() {
   const [filteredStudents, setFilteredStudents] = useState<Student[]>([]);
   const [emergencyContacts, setEmergencyContacts] = useState<EmergencyContact[]>([]);
   const [isLoadingContacts, setIsLoadingContacts] = useState(false);
-
-  // Fetch student data from the database
-  useEffect(() => {
-    async function fetchStudents() {
-      setIsLoadingStudents(true);
-      try {
-        const response = await fetch("/api/students");
-        if (!response.ok) {
-          throw new Error("Failed to fetch students");
-        }
-        
-        const data = await response.json();
-        setStudents(data);
-        setFilteredStudents(data);
-      } catch (error) {
-        console.error("Error fetching students:", error);
-        // Fallback to mock data if API fails
-        const mockStudents: Student[] = [
-          { id: "1001", first_name: "Thompson", last_name: "", year_group: "Year 9" },
-          { id: "1002", first_name: "Liam", last_name: "Khan", year_group: "Year 8" },
-          { id: "1003", first_name: "Freya", last_name: "Owen", year_group: "Year 7" },
-          { id: "1004", first_name: "Noah", last_name: "Singh", year_group: "Year 10" },
-          { id: "1005", first_name: "Isla", last_name: "Owen", year_group: "Year 9" },
-        ];
-        setStudents(mockStudents);
-        setFilteredStudents(mockStudents);
-      } finally {
-        setIsLoadingStudents(false);
+  
+// Fetch the list of students when the component loads
+useEffect(() => {
+  async function fetchStudents() {
+    setIsLoadingStudents(true);
+    try {
+      const response = await fetch("/api/students");
+      if (!response.ok) {
+        throw new Error("Failed to fetch students");
       }
+      const data = await response.json();
+      setStudents(data);
+      setFilteredStudents(data); // Initialize filtered students
+    } catch (error) {
+      console.error("Error fetching students:", error);
+      setStudents([]);
+    } finally {
+      setIsLoadingStudents(false);
+    }
+  }
+
+  fetchStudents();
+}, []);
+
+// Fetch emergency contacts when a student is selected
+useEffect(() => {
+  async function fetchEmergencyContacts() {
+    if (!selectedStudent) {
+      setEmergencyContacts([]);
+      return;
     }
 
-    fetchStudents();
-  }, []);
+    setIsLoadingContacts(true);
+    try {
+      const response = await fetch(`/api/students/${selectedStudent}/emergency-contacts`);
+      if (!response.ok) {
+        const errorText = await response.text(); // Get error details from the response
+        throw new Error(`Failed to fetch emergency contacts: ${response.status} ${response.statusText} - ${errorText}`);
+      }
+
+      const data = await response.json();
+      console.log("Fetched emergency contacts:", data); // Debugging log
+
+      if (Array.isArray(data)) {
+        setEmergencyContacts(data.filter(contact => contact.student_id === selectedStudent));
+      } else {
+        console.warn("Invalid data format for emergency contacts:", data);
+        setEmergencyContacts([]);
+      }
+    } catch (error: any) {
+      console.error("Error fetching emergency contacts:", error.message || error);
+      setError(
+        "Failed to load emergency contacts. Please try again later or contact support if the issue persists."
+      ); // Set user-friendly error message
+      setEmergencyContacts([]); // Clear contacts on error
+    } finally {
+      setIsLoadingContacts(false);
+    }
+  }
+
+  fetchEmergencyContacts();
+}, [selectedStudent]);
 
   // Filter students based on search query
   useEffect(() => {
@@ -102,54 +131,6 @@ export default function TestFormPage() {
       setFilteredStudents(filtered);
     }
   }, [searchQuery, students]);
-
-  // Fetch emergency contacts when a student is selected
-  useEffect(() => {
-    async function fetchEmergencyContacts() {
-      if (!selectedStudent) {
-        setEmergencyContacts([]);
-        return;
-      }
-
-      setIsLoadingContacts(true);
-      try {
-        const response = await fetch(`/api/students/${selectedStudent}/emergency-contacts`);
-        if (!response.ok) {
-          throw new Error("Failed to fetch emergency contacts");
-        }
-        
-        const data = await response.json();
-        setEmergencyContacts(data);
-      } catch (error) {
-        console.error("Error fetching emergency contacts:", error);
-        // Mock data if API fails
-        if (selectedStudent === "1002") {
-          // Example emergency contact from your data structure
-          setEmergencyContacts([{
-            id: "ec-1002a",
-            student_id: "1002",
-            first_name: "Yusuf",
-            last_name: "Khan",
-            relationship: "Father",
-            phone: "07988 998877",
-            email: "yusuf.khan@example.com",
-            address_line_1: "45 Wostenholm Road",
-            address_line_2: "Flat 2B",
-            town: "Sheffield",
-            county: "South Yorkshire",
-            postcode: "S7 1LE",
-            country: "United Kingdom"
-          }]);
-        } else {
-          setEmergencyContacts([]);
-        }
-      } finally {
-        setIsLoadingContacts(false);
-      }
-    }
-
-    fetchEmergencyContacts();
-  }, [selectedStudent]);
 
   const getSelectedStudentDetails = () => {
     if (!selectedStudent) return null;
@@ -169,20 +150,30 @@ export default function TestFormPage() {
     }
 
     const formData = new FormData(event.currentTarget);
+    
+    // Format the data according to the expected structure for the API
     const formValues = {
-      details: formData.get("details"),
-      incidentDate: formData.get("incidentDate"),
-      incidentTime: formData.get("incidentTime"),
-      actionsTaken: formData.get("actionsTaken"),
-      requiresFollowUp: formData.has("requiresFollowUp"),
-      isConfidential: formData.has("isConfidential"),
-      urgent: formData.has("urgent"),
-      primaryStudent: selectedStudent
+      // Main incident details
+      incident: {
+        details: formData.get("details"),
+        incident_date: formData.get("incidentDate"),
+        incident_time: formData.get("incidentTime"),
+        actions_taken: formData.get("actionsTaken"),
+        requires_follow_up: formData.has("requiresFollowUp") ? 1 : 0,
+        is_confidential: formData.has("isConfidential") ? 1 : 0,
+        urgent: formData.has("urgent") ? 1 : 0,
+      },
+      // Student information with role defaulted to "involved"
+      linkedStudents: [{
+        student_id: selectedStudent,
+        role: "involved" // Default role as requested
+      }]
     };
 
     try {
       console.log("Submitting data:", formValues);
       
+      // Make the API call to submit the incident report
       const response = await fetch("/api/incidents", {
         method: "POST",
         headers: {
@@ -191,12 +182,21 @@ export default function TestFormPage() {
         body: JSON.stringify(formValues),
       });
 
-      const data = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to submit form");
+      // Get the response data
+      let data;
+      try {
+        data = await response.json();
+      } catch (e) {
+        console.error("Error parsing response:", e);
+        throw new Error("Invalid response format from server");
       }
       
+      // Check if the response was successful
+      if (!response.ok) {
+        throw new Error(data.error || data.message || "Failed to submit incident report");
+      }
+      
+      // Handle success scenario
       setResponse(data);
       console.log("Success:", data);
       
@@ -206,7 +206,7 @@ export default function TestFormPage() {
       setEmergencyContacts([]);
     } catch (err: any) {
       setError(err.message || "An error occurred while submitting the form");
-      console.error("Error:", err);
+      console.error("Error submitting form:", err);
     } finally {
       setIsLoading(false);
     }
@@ -310,12 +310,15 @@ export default function TestFormPage() {
                 <Switch id="urgent" name="urgent" />
                 <Label htmlFor="urgent">Urgent</Label>
               </div>
+              
+              {/* Hidden field to ensure student role is always 'involved' */}
+              <input type="hidden" name="studentRole" value="involved" />
             </form>
           </CardContent>
           <CardFooter className="flex justify-between">
-            <Button 
-              type="reset" 
-              form="test-form" 
+            <Button
+              type="reset"
+              form="test-form"
               variant="outline" 
               onClick={() => {
                 setSearchQuery("");
@@ -422,8 +425,9 @@ export default function TestFormPage() {
                               <div className="pl-4">
                                 <p>{contact.address_line_1}</p>
                                 {contact.address_line_2 && <p>{contact.address_line_2}</p>}
-                                {contact.town && contact.postcode && 
-                                  <p>{contact.town}, {contact.postcode}</p>}
+                                {contact.town && contact.postcode && (
+                                  <p>{contact.town}, {contact.postcode}</p>
+                                )}
                                 {contact.county && <p>{contact.county}</p>}
                                 {contact.country && <p>{contact.country}</p>}
                               </div>
@@ -441,28 +445,28 @@ export default function TestFormPage() {
               </CardContent>
             </Card>
           )}
+          
+          {response && (
+            <Card className="mt-6 bg-green-50 border-green-200">
+              <CardContent className="pt-6">
+                <h3 className="font-medium text-green-800">Success!</h3>
+                <pre className="mt-2 p-2 bg-white rounded text-sm overflow-auto">
+                  {JSON.stringify(response, null, 2)}
+                </pre>
+              </CardContent>
+            </Card>
+          )}
+          
+          {error && (
+            <Card className="mt-6 bg-red-50 border-red-200">
+              <CardContent className="pt-6">
+                <h3 className="font-medium text-red-800">Error</h3>
+                <p className="mt-2">{error}</p>
+              </CardContent>
+            </Card>
+          )}
         </div>
       </div>
-      
-      {response && (
-        <Card className="mt-6 bg-green-50 border-green-200">
-          <CardContent className="pt-6">
-            <h3 className="font-medium text-green-800">Success!</h3>
-            <pre className="mt-2 p-2 bg-white rounded text-sm overflow-auto">
-              {JSON.stringify(response, null, 2)}
-            </pre>
-          </CardContent>
-        </Card>
-      )}
-      
-      {error && (
-        <Card className="mt-6 bg-red-50 border-red-200">
-          <CardContent className="pt-6">
-            <h3 className="font-medium text-red-800">Error</h3>
-            <p className="mt-2">{error}</p>
-          </CardContent>
-        </Card>
-      )}
     </div>
   );
 }

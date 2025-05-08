@@ -4,8 +4,14 @@ import mysql from "mysql2/promise";
 export async function GET(request: Request, context: { params: { id: string } }) {
   const reportId = context.params.id;
 
+  // Validate reportId
+  if (!reportId || isNaN(Number(reportId))) {
+    return NextResponse.json({ error: "Invalid report ID" }, { status: 400 });
+  }
+
+  let connection;
   try {
-    const connection = await mysql.createConnection({
+    connection = await mysql.createConnection({
       host: "localhost",
       user: "cladmin",
       password: "cladmin",
@@ -49,12 +55,24 @@ export async function GET(request: Request, context: { params: { id: string } })
     // Emergency contacts for all linked students
     const studentIds = (linkedStudents as any[]).map((s) => s.student_id);
     let emergencyContacts: any[] = [];
-    if (studentIds.length) {
-      const [contacts] = await connection.query(
-        `SELECT * FROM student_emergency_contacts WHERE student_id IN (?)`,
-        [studentIds]
-      );
-      emergencyContacts = contacts as any[];
+    if (studentIds.length > 0) {
+      try {
+        console.log("Fetching emergency contacts for student IDs:", studentIds); // Debugging log
+
+        // Use query with proper array handling
+        const [contacts] = await connection.query(
+          `SELECT * FROM student_emergency_contacts WHERE student_id IN (?)`,
+          [studentIds]
+        );
+
+        emergencyContacts = contacts as any[];
+        console.log("Fetched emergency contacts:", emergencyContacts); // Debugging log
+      } catch (error) {
+        console.error("Error fetching emergency contacts:", error);
+        emergencyContacts = []; // Ensure consistent response
+      }
+    } else {
+      console.warn("No linked students found, skipping emergency contacts query.");
     }
 
     // Attachments
@@ -81,18 +99,20 @@ export async function GET(request: Request, context: { params: { id: string } })
       [reportId]
     );
 
-    await connection.end();
-
     return NextResponse.json({
       incident,
-      linkedStudents,
-      emergencyContacts,
-      attachments,
-      bodyMapMarks,
-      notifications
+      linkedStudents: linkedStudents || [],
+      emergencyContacts: emergencyContacts || [],
+      attachments: attachments || [],
+      bodyMapMarks: bodyMapMarks || [],
+      notifications: notifications || []
     });
   } catch (error) {
-    console.error("Error in trace GET /api/incidents/[id]", error);
+    console.error("Error in GET /api/incidents/[id]:", error);
     return NextResponse.json({ error: "Server error" }, { status: 500 });
+  } finally {
+    if (connection) {
+      await connection.end();
+    }
   }
 }
