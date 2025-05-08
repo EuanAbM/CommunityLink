@@ -4,8 +4,8 @@ import mysql from "mysql2/promise";
 export async function GET(request: Request, context: { params: { id: string } }) {
   const reportId = context.params.id;
 
-  // Validate reportId
-  if (!reportId || isNaN(Number(reportId))) {
+  // Validate reportId (UUID, not number)
+  if (!reportId || typeof reportId !== "string" || reportId.length < 10) {
     return NextResponse.json({ error: "Invalid report ID" }, { status: 400 });
   }
 
@@ -57,22 +57,15 @@ export async function GET(request: Request, context: { params: { id: string } })
     let emergencyContacts: any[] = [];
     if (studentIds.length > 0) {
       try {
-        console.log("Fetching emergency contacts for student IDs:", studentIds); // Debugging log
-
         // Use query with proper array handling
         const [contacts] = await connection.query(
           `SELECT * FROM student_emergency_contacts WHERE student_id IN (?)`,
           [studentIds]
         );
-
         emergencyContacts = contacts as any[];
-        console.log("Fetched emergency contacts:", emergencyContacts); // Debugging log
       } catch (error) {
-        console.error("Error fetching emergency contacts:", error);
-        emergencyContacts = []; // Ensure consistent response
+        emergencyContacts = [];
       }
-    } else {
-      console.warn("No linked students found, skipping emergency contacts query.");
     }
 
     // Attachments
@@ -99,29 +92,17 @@ export async function GET(request: Request, context: { params: { id: string } })
       [reportId]
     );
 
-    // Fetch student details
-    const [students] = await connection.execute(
-      `SELECT id, first_name, last_name, year_group, tutor, date_of_birth, 
-              safeguarding_status, sen_status, has_confidential_information
-       FROM students
-       WHERE id = ?`,
-      [reportId]
+    // Example: Insert a student link (normally from POST, not GET)
+    // Uncomment and adjust as needed for your POST handler:
+    /*
+    const studentId = "1003"; // Replace with actual student ID from request or logic
+    const role = "involved";
+    await connection.execute(
+      `INSERT INTO report_incident_students (report_id, student_id, role)
+       VALUES (?, ?, ?)`,
+      [reportId, studentId, role]
     );
-
-    if (!Array.isArray(students) || students.length === 0) {
-      return NextResponse.json({ error: "Student not found" }, { status: 404 });
-    }
-
-    const student = students[0];
-
-    // Fetch emergency contacts for the student
-    const [studentEmergencyContacts] = await connection.execute(
-      `SELECT id, student_id, first_name, last_name, relationship, phone, email, 
-              address_line_1, address_line_2, town, county, postcode, country
-       FROM student_emergency_contacts
-       WHERE student_id = ?`,
-      [reportId]
-    );
+    */
 
     return NextResponse.json({
       incident,
@@ -129,9 +110,7 @@ export async function GET(request: Request, context: { params: { id: string } })
       emergencyContacts: emergencyContacts || [],
       attachments: attachments || [],
       bodyMapMarks: bodyMapMarks || [],
-      notifications: notifications || [],
-      student,
-      studentEmergencyContacts: studentEmergencyContacts || []
+      notifications: notifications || []
     });
   } catch (error) {
     console.error("Error in GET /api/incidents/[id]:", error);

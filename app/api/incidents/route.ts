@@ -3,6 +3,7 @@ import mysql from "mysql2/promise";
 
 // This function handles POST requests to create new incidents
 export async function POST(request: Request) {
+  let connection;
   try {
     // Parse the JSON body from the request
     const body = await request.json();
@@ -10,7 +11,7 @@ export async function POST(request: Request) {
     console.log("Received form submission data:", body);
     
     // Create database connection (using the same credentials as your GET route)
-    const connection = await mysql.createConnection({
+    connection = await mysql.createConnection({
       host: "localhost",
       user: "cladmin",
       password: "cladmin", 
@@ -24,14 +25,31 @@ export async function POST(request: Request) {
       // STEP 1: Insert the main incident record
       console.log("Inserting main incident record...");
       
-      const [incidentResult] = await connection.execute(
+      const {
+        id,
+        details,
+        incident_date,
+        incident_time,
+        actions_taken,
+        requires_follow_up,
+        is_confidential,
+        urgent,
+        status_id,
+        created_by,
+        student_id,
+        role
+      } = body;
+
+      await connection.execute(
         `INSERT INTO report_incidents (
-          category_id, location_id, incident_date, incident_time, 
+          id, category_id, location_id, incident_date, incident_time, 
           details, witness_user_id, actions_taken, 
           requires_follow_up, is_confidential, urgent, 
           created_by, status_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+
         [
+          id,
           body.categoryId || 1,             // Default to category 1 if missing
           body.locationId || 1,             // Default to location 1 if missing
           body.incidentDate || new Date(),  // Default to today if missing
@@ -48,8 +66,15 @@ export async function POST(request: Request) {
       );
       
       // @ts-ignore - Extract the auto-generated ID for the new incident
-      const reportId = incidentResult.insertId;
+      const reportId = id;
       console.log("Created incident with ID:", reportId);
+
+      // Insert into report_incident_students
+      await connection.execute(
+        `INSERT INTO report_incident_students (report_id, student_id, role)
+         VALUES (?, ?, ?)`,
+        [id, student_id, "involved"]
+      );
       
       // STEP 2: Link the primary student to the incident
       if (body.primaryStudent) {
@@ -143,5 +168,9 @@ export async function POST(request: Request) {
       }, 
       { status: 500 }
     );
+  } finally {
+    if (connection) {
+      await connection.end();
+    }
   }
 }

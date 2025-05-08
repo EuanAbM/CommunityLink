@@ -14,6 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { v4 as uuidv4 } from 'uuid';
 
 interface Student {
   id: string;
@@ -160,27 +161,40 @@ useEffect(() => {
 
     const formData = new FormData(event.currentTarget);
     
+    // Generate a UUID for the incident
+    const incidentId = uuidv4();
+
     // Format the data according to the expected structure for the API
+    // Try a completely different payload structure that doesn't nest students inside incident
     const formValues = {
-      // Main incident details
-      incident: {
-        details: formData.get("details"),
-        incident_date: formData.get("incidentDate"),
-        incident_time: formData.get("incidentTime"),
-        actions_taken: formData.get("actionsTaken"),
-        requires_follow_up: formData.has("requiresFollowUp") ? 1 : 0,
-        is_confidential: formData.has("isConfidential") ? 1 : 0,
-        urgent: formData.has("urgent") ? 1 : 0,
-      },
-      // Student information with role defaulted to "involved"
-      linkedStudents: [{
-        student_id: selectedStudent,
-        role: "involved" // Default role as requested
-      }]
+      id: incidentId, // <-- Add this line
+      details: formData.get("details"),
+      incident_date: formData.get("incidentDate"),
+      incident_time: formData.get("incidentTime"),
+      actions_taken: formData.get("actionsTaken") || "",
+      requires_follow_up: formData.has("requiresFollowUp") ? 1 : 0,
+      is_confidential: formData.has("isConfidential") ? 1 : 0,
+      urgent: formData.has("urgent") ? 1 : 0,
+      status_id: 1, // Default status (e.g., "Open" or "Pending")
+      created_by: 1, // Default user ID or fetch from context if available
+      
+      // Student connection as a separate property
+      student_id: selectedStudent,
+      role: "involved"
     };
 
+    // Add timestamp for debugging/tracking purposes
+    console.log(`Submitting incident at ${new Date().toISOString()}`);
+
     try {
-      console.log("Submitting data:", formValues);
+      // Display the exact payload being sent to help with debugging
+      console.log("Submitting data:", JSON.stringify(formValues, null, 2));
+      
+      // Show the submission data on the UI as well
+      setResponse({
+        status: "Submitting",
+        payload: formValues
+      });
       
       // Make the API call to submit the incident report
       const response = await fetch("/api/incidents", {
@@ -191,31 +205,97 @@ useEffect(() => {
         body: JSON.stringify(formValues),
       });
 
+      // Log the raw response for debugging
+      console.log("Response status:", response.status, response.statusText);
+      
       // Get the response data
       let data;
+      let responseText = "";
+      
       try {
-        data = await response.json();
+        responseText = await response.text();
+        console.log("Raw response text:", responseText);
+        
+        // Try to parse as JSON if it's valid JSON
+        try {
+          data = responseText ? JSON.parse(responseText) : {};
+        } catch (parseError) {
+          console.error("Error parsing JSON:", parseError);
+          data = { rawResponse: responseText };
+        }
       } catch (e) {
-        console.error("Error parsing response:", e);
-        throw new Error("Invalid response format from server");
+        console.error("Error reading response:", e);
+        throw new Error("Failed to read server response");
       }
+      
+      console.log("Parsed response data:", data);
       
       // Check if the response was successful
       if (!response.ok) {
-        throw new Error(data.error || data.message || "Failed to submit incident report");
+        // Create a detailed error message with all available information
+        const errorDetails = {
+          status: response.status,
+          statusText: response.statusText,
+          responseData: data,
+          responseText: responseText,
+          requestPayload: formValues
+        };
+        
+        const errorMessage = 
+          (data && data.error) || 
+          (data && data.message) || 
+          `Server error (${response.status}): ${response.statusText}`;
+        
+        console.error("Server error details:", errorDetails);
+        
+        // Set a more detailed error for the user
+        setError(`Error ${response.status}: ${errorMessage}\n\nRequest data may be invalid. See console for details.`);
+        
+        // Also update response state to show the error details in the UI
+        setResponse({
+          status: "Error",
+          requestPayload: formValues,
+          responseStatus: response.status,
+          responseText: responseText,
+          parsedResponse: data
+        });
+        
+        return; // Exit early but don't throw, so we can display the error details
       }
       
       // Handle success scenario
-      setResponse(data);
+      setResponse({
+        status: "Success",
+        requestPayload: formValues,
+        responseData: data
+      });
       console.log("Success:", data);
       
       // Reset form on success
-      event.currentTarget.reset();
+      if (event.currentTarget && typeof event.currentTarget.reset === "function") {
+        event.currentTarget.reset();
+      }
       setSelectedStudent(null);
       setEmergencyContacts([]);
+      setError(null);
     } catch (err: any) {
-      setError(err.message || "An error occurred while submitting the form");
       console.error("Error submitting form:", err);
+      
+      // Create a detailed error object for debugging
+      const errorObj = {
+        message: err.message || "An error occurred while submitting the form",
+        stack: err.stack,
+        formData: formValues
+      };
+      
+      setError(`${errorObj.message}\n\nCheck the console for more details.`);
+      
+      // Also set the response with error details
+      setResponse({
+        status: "Error",
+        error: errorObj,
+        requestPayload: formValues
+      });
     } finally {
       setIsLoading(false);
     }
@@ -456,12 +536,65 @@ useEffect(() => {
           )}
           
           {response && (
-            <Card className="mt-6 bg-green-50 border-green-200">
-              <CardContent className="pt-6">
-                <h3 className="font-medium text-green-800">Success!</h3>
-                <pre className="mt-2 p-2 bg-white rounded text-sm overflow-auto">
-                  {JSON.stringify(response, null, 2)}
-                </pre>
+            <Card className={`mt-6 ${response.status === "Success" ? "bg-green-50 border-green-200" : 
+                                    response.status === "Error" ? "bg-red-50 border-red-200" : 
+                                    "bg-blue-50 border-blue-200"}`}>
+              <CardHeader>
+                <CardTitle className={`${
+                  response.status === "Success" ? "text-green-800" : 
+                  response.status === "Error" ? "text-red-800" : 
+                  "text-blue-800"
+                }`}>
+                  {response.status === "Success" ? "Success!" : 
+                   response.status === "Error" ? "Error Details" : 
+                   "Submission Details"}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {/* Request Payload */}
+                  <div>
+                    <h4 className="font-medium mb-1">Request Payload:</h4>
+                    <pre className="p-2 bg-white rounded text-sm overflow-auto max-h-40 border">
+                      {JSON.stringify(response.requestPayload, null, 2)}
+                    </pre>
+                  </div>
+                  
+                  {/* Response Data */}
+                  {response.responseData && (
+                    <div>
+                      <h4 className="font-medium mb-1">Response Data:</h4>
+                      <pre className="p-2 bg-white rounded text-sm overflow-auto max-h-40 border">
+                        {JSON.stringify(response.responseData, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+                  
+                  {/* Error Information */}
+                  {response.status === "Error" && (
+                    <>
+                      {response.responseStatus && (
+                        <p className="text-red-700">Status Code: {response.responseStatus}</p>
+                      )}
+                      {response.responseText && (
+                        <div>
+                          <h4 className="font-medium mb-1">Raw Response:</h4>
+                          <pre className="p-2 bg-white rounded text-sm overflow-auto max-h-40 border">
+                            {response.responseText}
+                          </pre>
+                        </div>
+                      )}
+                      {response.parsedResponse && (
+                        <div>
+                          <h4 className="font-medium mb-1">Parsed Response:</h4>
+                          <pre className="p-2 bg-white rounded text-sm overflow-auto max-h-40 border">
+                            {JSON.stringify(response.parsedResponse, null, 2)}
+                          </pre>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
               </CardContent>
             </Card>
           )}
