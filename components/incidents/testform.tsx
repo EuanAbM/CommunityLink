@@ -78,9 +78,9 @@ useEffect(() => {
   fetchStudents();
 }, []);
 
-// Fetch emergency contacts when a student is selected
+// Fetch student details when a student is selected
 useEffect(() => {
-  async function fetchEmergencyContacts() {
+  async function fetchStudentDetailsAndContacts() {
     if (!selectedStudent) {
       setEmergencyContacts([]);
       return;
@@ -88,33 +88,42 @@ useEffect(() => {
 
     setIsLoadingContacts(true);
     try {
-      const response = await fetch(`/api/students/${selectedStudent}/emergency-contacts`);
+      // Use the existing full-profile endpoint which includes both student details and emergency contacts
+      const response = await fetch(`/api/students/${selectedStudent}/full-profile`);
       if (!response.ok) {
-        const errorText = await response.text(); // Get error details from the response
-        throw new Error(`Failed to fetch emergency contacts: ${response.status} ${response.statusText} - ${errorText}`);
+        const errorText = await response.text();
+        throw new Error(`Failed to fetch student profile: ${response.status} ${response.statusText} - ${errorText}`);
       }
 
-      const data = await response.json();
-      console.log("Fetched emergency contacts:", data); // Debugging log
+      const profileData = await response.json();
+      console.log("Fetched student profile:", profileData);
 
-      if (Array.isArray(data)) {
-        setEmergencyContacts(data.filter(contact => contact.student_id === selectedStudent));
+      // Update student details if needed
+      if (profileData.student) {
+        setStudents((prevStudents) =>
+          prevStudents.map((student) =>
+            student.id === selectedStudent ? { ...student, ...profileData.student } : student
+          )
+        );
+      }
+
+      // Set emergency contacts directly from the profile data
+      if (Array.isArray(profileData.emergencyContacts)) {
+        setEmergencyContacts(profileData.emergencyContacts);
       } else {
-        console.warn("Invalid data format for emergency contacts:", data);
+        console.warn("No emergency contacts found in profile data");
         setEmergencyContacts([]);
       }
-    } catch (error: any) {
-      console.error("Error fetching emergency contacts:", error.message || error);
-      setError(
-        "Failed to load emergency contacts. Please try again later or contact support if the issue persists."
-      ); // Set user-friendly error message
-      setEmergencyContacts([]); // Clear contacts on error
+    } catch (error) {
+      console.error("Error fetching student profile:", error);
+      setError("Failed to load student details or emergency contacts. Please try again.");
+      setEmergencyContacts([]);
     } finally {
       setIsLoadingContacts(false);
     }
   }
 
-  fetchEmergencyContacts();
+  fetchStudentDetailsAndContacts();
 }, [selectedStudent]);
 
   // Filter students based on search query

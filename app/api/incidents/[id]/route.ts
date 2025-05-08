@@ -99,13 +99,39 @@ export async function GET(request: Request, context: { params: { id: string } })
       [reportId]
     );
 
+    // Fetch student details
+    const [students] = await connection.execute(
+      `SELECT id, first_name, last_name, year_group, tutor, date_of_birth, 
+              safeguarding_status, sen_status, has_confidential_information
+       FROM students
+       WHERE id = ?`,
+      [reportId]
+    );
+
+    if (!Array.isArray(students) || students.length === 0) {
+      return NextResponse.json({ error: "Student not found" }, { status: 404 });
+    }
+
+    const student = students[0];
+
+    // Fetch emergency contacts for the student
+    const [studentEmergencyContacts] = await connection.execute(
+      `SELECT id, student_id, first_name, last_name, relationship, phone, email, 
+              address_line_1, address_line_2, town, county, postcode, country
+       FROM student_emergency_contacts
+       WHERE student_id = ?`,
+      [reportId]
+    );
+
     return NextResponse.json({
       incident,
       linkedStudents: linkedStudents || [],
       emergencyContacts: emergencyContacts || [],
       attachments: attachments || [],
       bodyMapMarks: bodyMapMarks || [],
-      notifications: notifications || []
+      notifications: notifications || [],
+      student,
+      studentEmergencyContacts: studentEmergencyContacts || []
     });
   } catch (error) {
     console.error("Error in GET /api/incidents/[id]:", error);
