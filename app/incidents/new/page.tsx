@@ -1,5 +1,6 @@
 import { SiteHeader } from "@/components/layout/site-header"
 import { IncidentReportForm } from "@/components/incidents/incident-form"
+import TestFormPage from "@/components/incidents/testform"
 
 export default function NewIncidentPage() {
   return (
@@ -12,6 +13,7 @@ export default function NewIncidentPage() {
             <p className="text-muted-foreground">Record a new safeguarding incident or concern</p>
           </div>
           <IncidentReportForm />
+          <TestFormPage />
         </div>
       </main>
     </div>
