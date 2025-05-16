@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import Image from "next/image"
 import Link from "next/link"
@@ -21,11 +21,48 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar"
 import { format } from "date-fns"
 import { CalendarIcon, Search, X, AlertTriangle, FileText, Upload } from "lucide-react"
-import { students, users } from "@/lib/data"
 import { useToast } from "@/hooks/use-toast"
 import { getInitials, getSafeguardingStatusColor } from "@/lib/utils"
-import type { Student } from "@/lib/types"
 import { BodyMapMarker } from "@/components/incidents/body-map-marker"
+import type { Student } from "@/lib/types"
+import { v4 as uuidv4 } from 'uuid';
+
+
+interface Student {
+  id: string;
+  first_name: string;
+  last_name: string;
+  year_group?: string;
+  tutor?: string;
+  date_of_birth?: string;
+  safeguarding_status?: string;
+  sen_status?: string;
+  has_confidential_information?: number;
+  emergencyContacts?: EmergencyContact[]; // Add this for consistency
+}
+
+interface EmergencyContact {
+  id: string;
+  student_id: string;
+  first_name: string;
+  last_name: string;
+  relationship: string;
+  phone: string;
+  email: string;
+  address_line_1?: string;
+  address_line_2?: string;
+  town?: string;
+  county?: string;
+  postcode?: string;
+  country?: string;
+}
+
+interface BodyMapMarkerData {
+  id: string;
+  x: number;
+  y: number;
+  note: string;
+}
 
 export function IncidentReportForm() {
   const { toast } = useToast()
@@ -33,164 +70,217 @@ export function IncidentReportForm() {
   const [isLoading, setIsLoading] = useState(false)
   const [isConfidential, setIsConfidential] = useState(false)
   const [needsFollowUp, setNeedsFollowUp] = useState(false)
-  const [searchTerm, setSearchTerm] = useState("")
-  const [selectedStudent, setSelectedStudent] = useState<Student | null>(null)
-  const [linkedStudents, setLinkedStudents] = useState<Student[]>([])
-  const [searchResults, setSearchResults] = useState<Student[]>([])
-  const [incidentDate, setIncidentDate] = useState<Date | undefined>(new Date())
-  const [incidentTime, setIncidentTime] = useState("")
-  const [bodyMapMarkers, setBodyMapMarkers] = useState<
-    {
-      id: string
-      x: number
-      y: number
-      note: string
-      view: "front" | "back"
-    }[]
-  >([])
-  const [selectedMarker, setSelectedMarker] = useState<string | null>(null)
-  const [markerNote, setMarkerNote] = useState("")
-  const [witnessStaff, setWitnessStaff] = useState<string[]>([])
-  const [staffSearchTerm, setStaffSearchTerm] = useState("")
-  const [staffSearchResults, setStaffSearchResults] = useState<typeof users>([])
+  
+  // Student search state (primary student)
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
+  const [students, setStudents] = useState<Student[]>([]); // This can be general student list from API
+  const [filteredStudents, setFilteredStudents] = useState<Student[]>([]); // For primary student search results
+  const [isLoadingStudents, setIsLoadingStudents] = useState(false); // For primary student search
+  const [searching, setSearching] = useState(false); // For primary student search
+  const searchTimeout = useRef<NodeJS.Timeout | null>(null);
+  
+  const [isLoadingContacts, setIsLoadingContacts] = useState(false)
+  const [incidentCategories, setIncidentCategories] = useState<any[]>([])
+  const [incidentSubcategories, setIncidentSubcategories] = useState<any[]>([])
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
+  const [locations, setLocations] = useState<any[]>([])
+  const [staffList, setStaffList] = useState<any[]>([])
 
-  const incidentCategories = [
-    "Bullying",
-    "Physical Abuse",
-    "Emotional Abuse",
-    "Neglect",
-    "Sexual Abuse",
-    "Disclosure",
-    "Self-Harm",
-    "Attendance",
-    "Mental Health",
-    "Online Safety",
-    "Peer-on-Peer",
-    "Other",
-  ]
+  // State for linked students
+  const [linkedStudents, setLinkedStudents] = useState<Student[]>([]);
+  const [linkedStudentSearchQuery, setLinkedStudentSearchQuery] = useState<string>("");
+  const [filteredLinkedStudents, setFilteredLinkedStudents] = useState<Student[]>([]);
+  const [isLoadingLinkedStudentSearch, setIsLoadingLinkedStudentSearch] = useState<boolean>(false);
+  const [searchingLinked, setSearchingLinked] = useState<boolean>(false);
+  const linkedSearchTimeout = useRef<NodeJS.Timeout | null>(null);
 
-  const locations = [
-    "C1m",
-    "Playground",
-    "Hallway",
-    "Cafeteria",
-    "Gym",
-    "Bathroom",
-    "School Bus",
-    "Field Trip",
-    "Off-site",
-    "Online/Digital",
-    "Other",
-  ]
+  // State for incident date and time
+  const [incidentDate, setIncidentDate] = useState<Date | undefined>(undefined);
+  const [incidentTime, setIncidentTime] = useState<string>("");
 
-  // Search students as user types
+  // State for body map
+  const [bodyMapMarkers, setBodyMapMarkers] = useState<BodyMapMarkerData[]>([]);
+  const [selectedMarker, setSelectedMarker] = useState<string | null>(null);
+  const [markerNote, setMarkerNote] = useState<string>("");
+
+
+  // AJAX search for primary students
   useEffect(() => {
-    if (searchTerm.length > 1) {
-      const results = students.filter(
-        (student) =>
-          `${student.firstName} ${student.lastName}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          student.yearGroup.toLowerCase().includes(searchTerm.toLowerCase()),
-      )
-      setSearchResults(results)
-    } else {
-      setSearchResults([])
+    const searchTerm = searchQuery.trim().toLowerCase();
+    if (searchTerm.length < 2) {
+      setFilteredStudents([]);
+      setIsLoadingStudents(false);
+      return;
     }
-  }, [searchTerm])
+    setIsLoadingStudents(true);
+    setSearching(true);
+    if (searchTimeout.current) clearTimeout(searchTimeout.current);
+    searchTimeout.current = setTimeout(async () => {
+      try {
+        const response = await fetch(`/api/students?search=${encodeURIComponent(searchTerm)}`);
+        if (!response.ok) throw new Error("Failed to fetch students");
+        const data = await response.json();
+        const arr = Array.isArray(data) ? data : [];
+        // Filter out already selected primary student and already linked students
+        const availableStudents = arr.filter((student: Student) => 
+          student.id !== selectedStudent?.id && !linkedStudents.find(ls => ls.id === student.id)
+        );
+        const filtered = availableStudents.filter((student: Student) => 
+          (student.first_name?.toLowerCase().startsWith(searchTerm) ||
+           student.last_name?.toLowerCase().startsWith(searchTerm) ||
+           student.id?.toLowerCase().startsWith(searchTerm))
+        );
+        // setStudents(arr); // Potentially remove if students are only fetched for filtering
+        setFilteredStudents(filtered);
+      } catch (error) {
+        // setStudents([]); // Potentially remove
+        setFilteredStudents([]);
+      } finally {
+        setIsLoadingStudents(false);
+        setSearching(false);
+      }
+    }, 300);
+    return () => {
+      if (searchTimeout.current) clearTimeout(searchTimeout.current);
+    };
+  }, [searchQuery, selectedStudent, linkedStudents]);
 
-  // Search staff as user types
+  // AJAX search for linked students
   useEffect(() => {
-    if (staffSearchTerm.length > 1) {
-      const results = users.filter(
-        (user) =>
-          `${user.firstName} ${user.lastName}`.toLowerCase().includes(staffSearchTerm.toLowerCase()) ||
-          (user.jobTitle && user.jobTitle.toLowerCase().includes(staffSearchTerm.toLowerCase())),
-      )
-      setStaffSearchResults(results)
-    } else {
-      setStaffSearchResults([])
+    const searchTerm = linkedStudentSearchQuery.trim().toLowerCase();
+    if (searchTerm.length < 2) {
+      setFilteredLinkedStudents([]);
+      setIsLoadingLinkedStudentSearch(false);
+      return;
     }
-  }, [staffSearchTerm])
+    setIsLoadingLinkedStudentSearch(true);
+    setSearchingLinked(true);
+    if (linkedSearchTimeout.current) clearTimeout(linkedSearchTimeout.current);
+    linkedSearchTimeout.current = setTimeout(async () => {
+      try {
+        const response = await fetch(`/api/students?search=${encodeURIComponent(searchTerm)}`);
+        if (!response.ok) throw new Error("Failed to fetch students for linking");
+        const data = await response.json();
+        const arr = Array.isArray(data) ? data : [];
+        // Filter out the primary selected student and already linked students
+        const availableToLink = arr.filter((student: Student) => 
+          student.id !== selectedStudent?.id && 
+          !linkedStudents.some(ls => ls.id === student.id)
+        );
+        const filtered = availableToLink.filter((student: Student) =>
+          (student.first_name?.toLowerCase().startsWith(searchTerm) ||
+           student.last_name?.toLowerCase().startsWith(searchTerm) ||
+           student.id?.toLowerCase().startsWith(searchTerm))
+        );
+        setFilteredLinkedStudents(filtered);
+      } catch (error) {
+        setFilteredLinkedStudents([]);
+      } finally {
+        setIsLoadingLinkedStudentSearch(false);
+        setSearchingLinked(false);
+      }
+    }, 300);
+    return () => {
+      if (linkedSearchTimeout.current) clearTimeout(linkedSearchTimeout.current);
+    };
+  }, [linkedStudentSearchQuery, selectedStudent, linkedStudents]);
+
+  // Fetch student details and merge emergency contacts into selectedStudent
+  useEffect(() => {
+    async function fetchStudentDetailsAndContacts() {
+      if (!selectedStudent) return;
+      setIsLoadingContacts(true);
+      try {
+        const response = await fetch(`/api/students/${selectedStudent.id}/full-profile`);
+        if (!response.ok) throw new Error("Failed to fetch student profile");
+        const profileData = await response.json();
+        setSelectedStudent({
+          ...selectedStudent,
+          ...profileData.student,
+          emergencyContacts: profileData.emergencyContacts || [],
+        });
+      } catch (error) {
+        setSelectedStudent(prev => prev ? { ...prev, emergencyContacts: [] } : null);
+      } finally {
+        setIsLoadingContacts(false);
+      }
+    }
+    if (selectedStudent) fetchStudentDetailsAndContacts();
+  }, [selectedStudent?.id]);
 
   const handleStudentSelect = (student: Student) => {
-    setSelectedStudent(student)
-    setSearchTerm("")
-    setSearchResults([])
-  }
+    setSelectedStudent(student);
+    setSearchQuery(""); // Clear primary search query
+    setFilteredStudents([]); // Clear primary search results
+  };
 
   const handleAddLinkedStudent = (student: Student) => {
-    if (!linkedStudents.some((s) => s.id === student.id) && student.id !== selectedStudent?.id) {
-      setLinkedStudents([...linkedStudents, student])
-      setSearchTerm("")
-      setSearchResults([])
+    if (!linkedStudents.find(ls => ls.id === student.id) && selectedStudent?.id !== student.id) {
+      setLinkedStudents(prev => [...prev, student]);
     }
-  }
+    setLinkedStudentSearchQuery(""); // Clear linked student search query
+    setFilteredLinkedStudents([]); // Clear linked student search results
+  };
 
   const handleRemoveLinkedStudent = (studentId: string) => {
-    setLinkedStudents(linkedStudents.filter((s) => s.id !== studentId))
-  }
-
-  const handleBodyMapClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect()
-    const x = e.clientX - rect.left
-    const y = e.clientY - rect.top
-
-    // Calculate percentage positions for responsiveness
-    const xPercent = (x / rect.width) * 100
-    const yPercent = (y / rect.height) * 100
-
-    const newMarker = {
-      id: `marker-${Date.now()}`,
-      x: xPercent,
-      y: yPercent,
-      note: "",
-      view: "front", // Keep this for compatibility but we don't use tabs anymore
-    }
-
-    setBodyMapMarkers([...bodyMapMarkers, newMarker])
-    setSelectedMarker(newMarker.id)
-    setMarkerNote("")
-  }
-
-  const saveMarkerNote = () => {
-    if (selectedMarker && markerNote.trim()) {
-      setBodyMapMarkers(
-        bodyMapMarkers.map((marker) => (marker.id === selectedMarker ? { ...marker, note: markerNote } : marker)),
-      )
-      setSelectedMarker(null)
-      setMarkerNote("")
-    }
-  }
-
-  const removeMarker = (id: string) => {
-    setBodyMapMarkers(bodyMapMarkers.filter((marker) => marker.id !== id))
-    if (selectedMarker === id) {
-      setSelectedMarker(null)
-      setMarkerNote("")
-    }
-  }
-
-  const handleWitnessToggle = (staffId: string) => {
-    if (witnessStaff.includes(staffId)) {
-      setWitnessStaff(witnessStaff.filter((id) => id !== staffId))
-    } else {
-      setWitnessStaff([...witnessStaff, staffId])
-    }
-  }
+    setLinkedStudents(prev => prev.filter(student => student.id !== studentId));
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
 
-    // Simulate form submission
-    await new Promise((resolve) => setTimeout(resolve, 1500))
+    const formData = new FormData(e.currentTarget as HTMLFormElement);
+    const incidentId = uuidv4();
 
-    toast({
-      title: "Incident reported successfully",
-      description: "The safeguarding team has been notified.",
-    })
+    const formValues = {
+      id: incidentId,
+      details: formData.get("description"),
+      incident_date: incidentDate ? format(incidentDate, "yyyy-MM-dd") : null,
+      incident_time: incidentTime,
+      actions_taken: formData.get("actions") || "",
+      requires_follow_up: needsFollowUp ? 1 : 0,
+      is_confidential: isConfidential ? 1 : 0,
+      urgent: formData.get("immediate-risk") === "on" ? 1 : 0,
+      status_id: 1, // Default status, adjust as needed
+      created_by: 1, // Placeholder for logged-in user ID
+      student_id: selectedStudent?.id,
+      role: "primary", // For the primary student
+      // Add linked students, body map markers, etc.
+      linked_students: linkedStudents.map(ls => ({ student_id: ls.id, role: "linked" })), // Example structure
+      body_map_markers: bodyMapMarkers,
+      // ... other fields like category_id, subcategory_id, location_id
+    };
 
-    setIsLoading(false)
-    router.push("/dashboard")
+    try {
+      const response = await fetch("/api/incidents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(formValues),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to create incident");
+      }
+
+      const data = await response.json();
+      toast({
+        title: "Success",
+        description: "Incident report created successfully",
+      });
+
+      router.push("/dashboard");
+    } catch (error) {
+      console.error("Error creating incident:", error);
+      toast({
+        title: "Error",
+        description: "Failed to create incident report",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
   }
 
   function getAgeFromDOB(dateOfBirth: string): number {
@@ -204,6 +294,56 @@ export function IncidentReportForm() {
     return age
   }
 
+  // Helper to get selected student details (match testform.tsx)
+  const getSelectedStudentDetails = () => {
+    if (!selectedStudent) return null;
+    // Assuming 'students' state holds all fetched student details, or fetch if not.
+    // For now, it uses the selectedStudent object directly which should be populated by fetchStudentDetailsAndContacts
+    return selectedStudent; 
+  };
+
+  // Body Map Handlers
+  const handleBodyMapClick = (event: React.MouseEvent<HTMLDivElement, MouseEvent>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    // Calculate click position relative to the image, assuming image fills the div
+    // This might need adjustment based on actual image rendering and aspect ratio
+    const x = ((event.clientX - rect.left) / rect.width) * 100; // Percentage
+    const y = ((event.clientY - rect.top) / rect.height) * 100; // Percentage
+
+    const newMarker: BodyMapMarkerData = {
+      id: uuidv4(),
+      x,
+      y,
+      note: "",
+    };
+    setBodyMapMarkers([...bodyMapMarkers, newMarker]);
+    setSelectedMarker(newMarker.id);
+    setMarkerNote(""); // Reset note for new marker
+  };
+
+  const saveMarkerNote = () => {
+    if (!selectedMarker) return;
+    setBodyMapMarkers(
+      bodyMapMarkers.map((marker) =>
+        marker.id === selectedMarker ? { ...marker, note: markerNote } : marker
+      )
+    );
+    // Optionally clear selectedMarker and markerNote after saving
+    // setSelectedMarker(null);
+    // setMarkerNote("");
+    toast({ title: "Note Saved", description: "Marker note has been updated." });
+  };
+
+  const removeMarker = (markerIdToRemove: string) => {
+    setBodyMapMarkers(bodyMapMarkers.filter((marker) => marker.id !== markerIdToRemove));
+    if (selectedMarker === markerIdToRemove) {
+      setSelectedMarker(null);
+      setMarkerNote("");
+    }
+    toast({ title: "Marker Removed", description: "The marker has been removed." });
+  };
+
+
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -216,72 +356,102 @@ export function IncidentReportForm() {
               <CardDescription>Search and select the primary student involved in this incident</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="relative">
-                <Label htmlFor="student-search">Search Student</Label>
-                <div className="relative">
-                  <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    id="student-search"
-                    type="search"
-                    placeholder="Search by name or year group..."
-                    className="pl-8"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                  />
+              {/* Student Search */}
+              <div className="space-y-2">
+                <Label htmlFor="student-search">Student Search</Label>
+                <Input
+                  id="student-search"
+                  placeholder="Search by name or ID"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="mb-2"
+                />
+                {/* Results */}
+                <div className="mt-2 space-y-2">
+                  {isLoadingStudents ? (
+                    <div className="text-sm text-gray-500">Loading...</div>
+                  ) : searchQuery.length < 2 ? (
+                    <div className="text-sm text-gray-500">Type at least 2 characters to search</div>
+                  ) : filteredStudents.length === 0 ? (
+                    <div className="text-sm text-gray-500">No students found</div>
+                  ) : (
+                    <div className="grid gap-2">
+                      {filteredStudents.map(student => (
+                        <Card
+                          key={student.id}
+                          className={`cursor-pointer hover:bg-gray-50 transition-colors ${
+                            selectedStudent?.id === student.id ? 'border-blue-500 bg-blue-50' : ''
+                          }`}
+                          onClick={() => handleStudentSelect(student)}
+                        >
+                          <CardContent className="p-4">
+                            <div className="flex justify-between items-start">
+                              <div>
+                                <div className="font-medium">
+                                  {student.first_name} {student.last_name}
+                                </div>
+                                <div className="text-sm text-gray-500">
+                                  ID: {student.id}
+                                </div>
+                                {student.year_group && (
+                                  <div className="text-sm text-gray-500">
+                                    Year: {student.year_group}
+                                  </div>
+                                )}
+                              </div>
+                              {selectedStudent?.id === student.id && (
+                                <div className="text-blue-500">
+                                  ✓
+                                </div>
+                              )}
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  )}
                 </div>
-
-                {searchResults.length > 0 && (
-                  <div className="absolute z-10 w-full mt-1 bg-background border rounded-md shadow-md max-h-60 overflow-auto">
-                    {searchResults.map((student) => (
-                      <div
-                        key={student.id}
-                        className="flex items-center gap-2 p-2 hover:bg-muted cursor-pointer"
-                        onClick={() =>
-                          selectedStudent ? handleAddLinkedStudent(student) : handleStudentSelect(student)
-                        }
-                      >
-                        <Avatar className="h-8 w-8">
-                          <AvatarFallback>{getInitials(student.firstName, student.lastName)}</AvatarFallback>
-                        </Avatar>
-                        <div>
-                          <p className="font-medium">
-                            {student.firstName} {student.lastName}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {student.yearGroup} • {student.tutor}
-                          </p>
-                        </div>
-                        {student.hasConfidentialInformation && (
-                          <AlertTriangle className="h-4 w-4 text-amber-500 ml-auto" />
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
+                {searching && <div className="text-xs text-gray-500 mt-1">Searching...</div>}
               </div>
-
+              
               {selectedStudent && (
                 <div className="p-4 border rounded-md bg-muted/30">
                   <div className="flex items-center gap-3">
                     <Avatar className="h-10 w-10">
                       <AvatarFallback>
-                        {getInitials(selectedStudent.firstName, selectedStudent.lastName)}
+                        {getInitials(selectedStudent.first_name, selectedStudent.last_name)}
                       </AvatarFallback>
                     </Avatar>
                     <div className="flex-1">
                       <p className="font-medium">
-                        {selectedStudent.firstName} {selectedStudent.lastName}
+                        {selectedStudent.first_name} {selectedStudent.last_name}
                       </p>
                       <p className="text-sm text-muted-foreground">
-                        {selectedStudent.yearGroup} • {selectedStudent.tutor}
+                        {selectedStudent.year_group} • {selectedStudent.tutor}
                       </p>
                     </div>
-                    <Badge variant="outline" className={getSafeguardingStatusColor(selectedStudent.safeguardingStatus)}>
-                      {selectedStudent.safeguardingStatus || "None"}
+                    <Badge variant="outline" className={getSafeguardingStatusColor(selectedStudent.safeguarding_status)}>
+                      {selectedStudent.safeguarding_status || "None"}
                     </Badge>
                     <Button type="button" variant="ghost" size="icon" onClick={() => setSelectedStudent(null)}>
                       <X className="h-4 w-4" />
                     </Button>
+                  </div>
+                  {/* Emergency Contacts */}
+                  <div className="space-y-2 mt-4">
+                    <Label>Emergency Contacts</Label>
+                    <div className="space-y-2">
+                      {selectedStudent.emergencyContacts && selectedStudent.emergencyContacts.length > 0 ? selectedStudent.emergencyContacts.map((contact) => (
+                        <div key={contact.id} className="text-sm border rounded p-2">
+                          <div className="flex justify-between">
+                            <span className="font-medium">{contact.first_name} {contact.last_name}</span>
+                            <span className="text-muted-foreground">{contact.relationship}</span>
+                          </div>
+                          <div className="text-muted-foreground">{contact.phone} | {contact.email}</div>
+                          <div className="text-xs">{contact.address_line_1} {contact.town} {contact.postcode}</div>
+                        </div>
+                      )) : <div className="text-xs text-muted-foreground">No emergency contacts found.</div>}
+                    </div>
                   </div>
                 </div>
               )}
@@ -292,16 +462,16 @@ export function IncidentReportForm() {
 
                 <div className="space-y-2">
                   {linkedStudents.map((student) => (
-                    <div key={student.id} className="flex items-center gap-2 p-2 border rounded-md">
+                    <div key={student.id} className="flex items-center gap-2 p-2 border rounded-md bg-muted/20">
                       <Avatar className="h-8 w-8">
-                        <AvatarFallback>{getInitials(student.firstName, student.lastName)}</AvatarFallback>
+                        <AvatarFallback>{getInitials(student.first_name, student.last_name)}</AvatarFallback>
                       </Avatar>
                       <div className="flex-1">
                         <p className="font-medium">
-                          {student.firstName} {student.lastName}
+                          {student.first_name} {student.last_name}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {student.yearGroup} • {student.tutor}
+                          {student.year_group} • {student.tutor}
                         </p>
                       </div>
                       <Button
@@ -315,22 +485,60 @@ export function IncidentReportForm() {
                     </div>
                   ))}
 
-                  {linkedStudents.length === 0 && (
-                    <div className="text-sm text-muted-foreground italic">No linked students added</div>
+                  {linkedStudents.length === 0 && !selectedStudent && (
+                    <div className="text-sm text-muted-foreground italic">Select a primary student first.</div>
+                  )}
+                  {linkedStudents.length === 0 && selectedStudent && (
+                    <div className="text-sm text-muted-foreground italic">No linked students added.</div>
                   )}
 
                   {selectedStudent && (
-                    <div className="relative">
+                    <div className="relative mt-2">
                       <div className="relative">
                         <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                         <Input
                           type="search"
                           placeholder="Search for students to link..."
                           className="pl-8"
-                          value={searchTerm}
-                          onChange={(e) => setSearchTerm(e.target.value)}
+                          value={linkedStudentSearchQuery}
+                          onChange={(e) => setLinkedStudentSearchQuery(e.target.value)}
                         />
                       </div>
+                      {isLoadingLinkedStudentSearch ? (
+                        <div className="absolute z-10 w-full mt-1 bg-background border rounded-md shadow-md max-h-60 overflow-auto p-2 text-center text-xs text-muted-foreground">
+                          Loading...
+                        </div>
+                      ) : linkedStudentSearchQuery.length > 0 && filteredLinkedStudents.length === 0 && !searchingLinked ? (
+                        <div className="absolute z-10 w-full mt-1 bg-background border rounded-md shadow-md max-h-60 overflow-auto p-2 text-center text-xs text-muted-foreground">
+                          No students found.
+                        </div>
+                      ) : filteredLinkedStudents.length > 0 ? (
+                        <div className="absolute z-10 w-full mt-1 bg-background border rounded-md shadow-md max-h-60 overflow-auto">
+                          {filteredLinkedStudents.map((student) => (
+                            <div
+                              key={student.id}
+                              className="flex items-center gap-2 p-2 hover:bg-muted cursor-pointer"
+                              onClick={() => handleAddLinkedStudent(student)}
+                            >
+                              <Avatar className="h-8 w-8">
+                                <AvatarFallback>{getInitials(student.first_name, student.last_name)}</AvatarFallback>
+                              </Avatar>
+                              <div>
+                                <p className="font-medium">
+                                  {student.first_name} {student.last_name}
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                  {student.year_group} • {student.tutor}
+                                </p>
+                              </div>
+                              {student.has_confidential_information && (
+                                <AlertTriangle className="h-4 w-4 text-amber-500 ml-auto" />
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                       {searchingLinked && <div className="text-xs text-gray-500 mt-1">Searching linked...</div>}
                     </div>
                   )}
                 </div>
@@ -346,178 +554,90 @@ export function IncidentReportForm() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Incident Category */}
                 <div className="space-y-2">
-                  <Label>Incident Category</Label>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border rounded-md p-4">
-                    <div className="space-y-3">
-                      <div className="space-y-1">
-                        <div className="flex items-center space-x-2">
-                          <Checkbox id="category-bullying" />
-                          <Label htmlFor="category-bullying" className="font-medium">
-                            Bullying
-                          </Label>
-                        </div>
-                        <div className="ml-6 space-y-1">
-                          <div className="flex items-center space-x-2">
-                            <Checkbox id="category-verbal" />
-                            <Label htmlFor="category-verbal" className="text-sm">
-                              Verbal
-                            </Label>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <Checkbox id="category-physical" />
-                            <Label htmlFor="category-physical" className="text-sm">
-                              Physical
-                            </Label>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <Checkbox id="category-cyber" />
-                            <Label htmlFor="category-cyber" className="text-sm">
-                              Cyber
-                            </Label>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="space-y-1">
-                        <div className="flex items-center space-x-2">
-                          <Checkbox id="category-physical-abuse" />
-                          <Label htmlFor="category-physical-abuse" className="font-medium">
-                            Physical Abuse
-                          </Label>
-                        </div>
-                        <div className="ml-6 space-y-1">
-                          <div className="flex items-center space-x-2">
-                            <Checkbox id="category-hitting" />
-                            <Label htmlFor="category-hitting" className="text-sm">
-                              Hitting
-                            </Label>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <Checkbox id="category-bruising" />
-                            <Label htmlFor="category-bruising" className="text-sm">
-                              Bruising
-                            </Label>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="space-y-1">
-                        <div className="flex items-center space-x-2">
-                          <Checkbox id="category-emotional-abuse" />
-                          <Label htmlFor="category-emotional-abuse" className="font-medium">
-                            Emotional Abuse
-                          </Label>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="space-y-3">
-                      <div className="space-y-1">
-                        <div className="flex items-center space-x-2">
-                          <Checkbox id="category-neglect" />
-                          <Label htmlFor="category-neglect" className="font-medium">
-                            Neglect
-                          </Label>
-                        </div>
-                      </div>
-
-                      <div className="space-y-1">
-                        <div className="flex items-center space-x-2">
-                          <Checkbox id="category-sexual-abuse" />
-                          <Label htmlFor="category-sexual-abuse" className="font-medium">
-                            Sexual Abuse
-                          </Label>
-                        </div>
-                      </div>
-
-                      <div className="space-y-1">
-                        <div className="flex items-center space-x-2">
-                          <Checkbox id="category-self-harm" />
-                          <Label htmlFor="category-self-harm" className="font-medium">
-                            Self-Harm
-                          </Label>
-                        </div>
-                      </div>
-
-                      <div className="space-y-1">
-                        <div className="flex items-center space-x-2">
-                          <Checkbox id="category-attendance" />
-                          <Label htmlFor="category-attendance" className="font-medium">
-                            Attendance
-                          </Label>
-                        </div>
-                      </div>
-
-                      <div className="space-y-1">
-                        <div className="flex items-center space-x-2">
-                          <Checkbox id="category-mental-health" />
-                          <Label htmlFor="category-mental-health" className="font-medium">
-                            Mental Health
-                          </Label>
-                        </div>
-                      </div>
-
-                      <div className="space-y-1">
-                        <div className="flex items-center space-x-2">
-                          <Checkbox id="category-other" />
-                          <Label htmlFor="category-other" className="font-medium">
-                            Other
-                          </Label>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                  <Label htmlFor="incident-category">Incident Category</Label>
+                  <Select onValueChange={setSelectedCategory}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {incidentCategories.map(cat => (
+                        <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
-
+                {/* Incident Subcategory */}
+                <div className="space-y-2">
+                  <Label htmlFor="incident-subcategory">Subcategory</Label>
+                  <Select>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select subcategory" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {incidentSubcategories.map(sub => (
+                        <SelectItem key={sub.id} value={sub.id}>{sub.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {/* Location */}
                 <div className="space-y-2">
                   <Label htmlFor="location">Location</Label>
-                  <div className="relative">
-                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                    <Input id="location" type="search" placeholder="Search for location..." className="pl-8" />
-                  </div>
-                  <div className="flex flex-wrap gap-2 mt-2">
-                    <Button type="button" variant="outline" size="sm" className="text-xs">
-                      Classroom 3B
-                    </Button>
-                    <Button type="button" variant="outline" size="sm" className="text-xs">
-                      Playground
-                    </Button>
-                    <Button type="button" variant="outline" size="sm" className="text-xs">
-                      Cafeteria
-                    </Button>
-                    <Button type="button" variant="outline" size="sm" className="text-xs">
-                      Gym
-                    </Button>
-                    <Button type="button" variant="outline" size="sm" className="text-xs">
-                      School Bus
-                    </Button>
-                  </div>
+                  <Select>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select location" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {locations.map(loc => (
+                        <SelectItem key={loc.id} value={loc.id}>{loc.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
-
+                {/* Date */}
                 <div className="space-y-2">
-                  <Label htmlFor="date">Incident Date</Label>
+                  <Label htmlFor="incident_date">Date of Incident</Label>
                   <Popover>
                     <PopoverTrigger asChild>
-                      <Button variant="outline" className="w-full justify-start text-left font-normal">
+                      <Button
+                        variant={"outline"}
+                        className={`w-full justify-start text-left font-normal ${
+                          !incidentDate && "text-muted-foreground"
+                        }`}
+                      >
                         <CalendarIcon className="mr-2 h-4 w-4" />
                         {incidentDate ? format(incidentDate, "PPP") : <span>Pick a date</span>}
                       </Button>
                     </PopoverTrigger>
                     <PopoverContent className="w-auto p-0">
-                      <Calendar mode="single" selected={incidentDate} onSelect={setIncidentDate} initialFocus />
+                      <Calendar
+                        mode="single"
+                        selected={incidentDate}
+                        onSelect={setIncidentDate}
+                        initialFocus
+                      />
                     </PopoverContent>
                   </Popover>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="time">Incident Time</Label>
+                  {/* Hidden input for form submission if needed, or manage via state */}
                   <Input
-                    id="time"
+                    id="incident_date"
+                    name="incident_date" // Ensure name attribute for FormData
+                    type="hidden"
+                    value={incidentDate ? format(incidentDate, "yyyy-MM-dd") : ""}
+                  />
+                </div>
+                {/* Time */}
+                <div className="space-y-2">
+                  <Label htmlFor="incident_time">Time of Incident</Label>
+                  <Input
+                    id="incident_time"
+                    name="incident_time" // Ensure name attribute for FormData
                     type="time"
+                    placeholder="Select time"
                     value={incidentTime}
                     onChange={(e) => setIncidentTime(e.target.value)}
-                    required
                   />
                 </div>
               </div>
@@ -532,76 +652,38 @@ export function IncidentReportForm() {
                 />
               </div>
 
+              {/* Witness Staff */}
               <div className="space-y-2">
                 <Label>Witness Staff</Label>
-                <div className="relative mb-2">
-                  <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    type="search"
-                    placeholder="Search for staff members..."
-                    className="pl-8"
-                    value={staffSearchTerm}
-                    onChange={(e) => setStaffSearchTerm(e.target.value)}
-                  />
-                </div>
-
-                {staffSearchResults.length > 0 && (
-                  <div className="border rounded-md shadow-sm max-h-40 overflow-y-auto mb-4">
-                    {staffSearchResults.map((staff) => (
-                      <div
-                        key={staff.id}
-                        className="flex items-center space-x-2 p-2 hover:bg-muted cursor-pointer"
-                        onClick={() => handleWitnessToggle(staff.id)}
-                      >
-                        <Checkbox
-                          id={`staff-${staff.id}`}
-                          checked={witnessStaff.includes(staff.id)}
-                          onCheckedChange={() => handleWitnessToggle(staff.id)}
-                        />
-                        <Avatar className="h-6 w-6">
-                          <AvatarFallback>{getInitials(staff.firstName, staff.lastName)}</AvatarFallback>
-                        </Avatar>
-                        <Label htmlFor={`staff-${staff.id}`} className="text-sm cursor-pointer">
-                          {staff.firstName} {staff.lastName} {staff.jobTitle && `(${staff.jobTitle})`}
-                        </Label>
-                      </div>
+                <Select multiple>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select witness staff" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {staffList.map(staff => (
+                      <SelectItem key={staff.id} value={staff.id}>
+                        {staff.first_name} {staff.last_name} ({staff.job_title})
+                      </SelectItem>
                     ))}
-                  </div>
-                )}
-
-                {witnessStaff.length > 0 && (
-                  <div className="border rounded-md p-3">
-                    <p className="text-sm font-medium mb-2">Selected Staff:</p>
-                    <div className="flex flex-wrap gap-2">
-                      {witnessStaff.map((staffId) => {
-                        const staff = users.find((u) => u.id === staffId)
-                        if (!staff) return null
-
-                        return (
-                          <Badge key={staffId} variant="secondary" className="flex items-center gap-1">
-                            {staff.firstName} {staff.lastName}
-                            <button
-                              type="button"
-                              className="ml-1 hover:text-destructive"
-                              onClick={() => handleWitnessToggle(staffId)}
-                            >
-                              ×
-                            </button>
-                          </Badge>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )}
+                  </SelectContent>
+                </Select>
               </div>
 
+              {/* Staff to Notify */}
               <div className="space-y-2">
-                <Label htmlFor="actions">Actions Already Taken</Label>
-                <Textarea
-                  id="actions"
-                  placeholder="Describe any immediate actions you've already taken..."
-                  className="min-h-[80px]"
-                />
+                <Label>Staff to Notify</Label>
+                <Select>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select staff to notify" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {staffList.map(staff => (
+                      <SelectItem key={staff.id} value={staff.id}>
+                        {staff.first_name} {staff.last_name} ({staff.job_title})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="flex items-center space-x-2">
@@ -625,28 +707,6 @@ export function IncidentReportForm() {
                   This incident will only be visible to users with appropriate permissions.
                 </p>
               )}
-
-              <div className="space-y-2">
-                <Label>Staff to Notify</Label>
-                <Select>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select staff to notify" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {users
-                      .filter((user) => user.role !== "super_user")
-                      .map((staff) => (
-                        <SelectItem key={staff.id} value={staff.id}>
-                          {staff.firstName} {staff.lastName} ({staff.jobTitle})
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
-                <div className="p-2 mt-2 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-md text-sm">
-                  <AlertTriangle className="h-4 w-4 text-amber-500 inline mr-1" />
-                  <span>This individual wouldn't normally be notified about this case for this child.</span>
-                </div>
-              </div>
 
               <div className="space-y-2">
                 <Label>Attachments</Label>
@@ -702,11 +762,12 @@ export function IncidentReportForm() {
                     {bodyMapMarkers.map((marker, index) => (
                       <BodyMapMarker
                         key={marker.id}
-                        marker={marker}
+                        marker={marker} // Pass the whole marker object
                         index={index + 1}
-                        onClick={() => {
-                          setSelectedMarker(marker.id)
-                          setMarkerNote(marker.note)
+                        onClick={(e) => {
+                          e.stopPropagation(); // Prevent click from bubbling to the parent div
+                          setSelectedMarker(marker.id);
+                          setMarkerNote(marker.note);
                         }}
                       />
                     ))}
@@ -773,14 +834,14 @@ export function IncidentReportForm() {
               <CardContent className="space-y-4">
                 <div className="flex items-center gap-4">
                   <Avatar className="h-16 w-16">
-                    <AvatarFallback>{getInitials(selectedStudent.firstName, selectedStudent.lastName)}</AvatarFallback>
+                    <AvatarFallback>{getInitials(getSelectedStudentDetails()?.first_name, getSelectedStudentDetails()?.last_name)}</AvatarFallback>
                   </Avatar>
                   <div>
                     <h3 className="text-lg font-medium">
-                      {selectedStudent.firstName} {selectedStudent.lastName}
+                      {getSelectedStudentDetails()?.first_name} {getSelectedStudentDetails()?.last_name}
                     </h3>
                     <p className="text-sm text-muted-foreground">
-                      {selectedStudent.yearGroup} • Tutor: {selectedStudent.tutor}
+                      {getSelectedStudentDetails()?.year_group} • Tutor: {getSelectedStudentDetails()?.tutor}
                     </p>
                   </div>
                 </div>
@@ -791,23 +852,23 @@ export function IncidentReportForm() {
                   <div className="flex justify-between">
                     <span className="text-sm text-muted-foreground">Date of Birth:</span>
                     <span className="text-sm">
-                      {format(new Date(selectedStudent.dateOfBirth), "PPP")}
+                      {format(new Date(getSelectedStudentDetails()?.date_of_birth), "PPP")}
                       <span className="ml-1 text-muted-foreground">
-                        (Age: {getAgeFromDOB(selectedStudent.dateOfBirth)})
+                        (Age: {getAgeFromDOB(getSelectedStudentDetails()?.date_of_birth)})
                       </span>
                     </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-sm text-muted-foreground">Safeguarding Status:</span>
-                    <Badge variant="outline" className={getSafeguardingStatusColor(selectedStudent.safeguardingStatus)}>
-                      {selectedStudent.safeguardingStatus || "None"}
+                    <Badge variant="outline" className={getSafeguardingStatusColor(getSelectedStudentDetails()?.safeguarding_status)}>
+                      {getSelectedStudentDetails()?.safeguarding_status || "None"}
                     </Badge>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-sm text-muted-foreground">SEN Status:</span>
-                    <span className="text-sm">{selectedStudent.senStatus || "None"}</span>
+                    <span className="text-sm">{getSelectedStudentDetails()?.sen_status || "None"}</span>
                   </div>
-                  {selectedStudent.hasConfidentialInformation && (
+                  {getSelectedStudentDetails()?.has_confidential_information && (
                     <div className="flex items-center gap-2 p-2 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-md text-sm">
                       <AlertTriangle className="h-4 w-4 text-amber-500" />
                       <span>Contains confidential information</span>
@@ -820,20 +881,25 @@ export function IncidentReportForm() {
                 <div className="space-y-2">
                   <h4 className="text-sm font-medium">Emergency Contacts</h4>
                   <div className="space-y-2">
-                    {selectedStudent.emergencyContacts.map((contact) => (
+                    {getSelectedStudentDetails()?.emergencyContacts && getSelectedStudentDetails()?.emergencyContacts.length > 0 ? (
+                      getSelectedStudentDetails()?.emergencyContacts.map((contact) => (
                       <div key={contact.id} className="text-sm">
                         <div className="flex justify-between">
-                          <span className="font-medium">{contact.name}</span>
+                          <span className="font-medium">{contact.first_name} {contact.last_name}</span>
                           <span className="text-muted-foreground">{contact.relationship}</span>
                         </div>
-                        <p className="text-muted-foreground">{contact.phone}</p>
-                        {contact.isRisk && (
+                        <p className="text-muted-foreground">{contact.phone} | {contact.email}</p>
+                        {/* Assuming isRisk and riskNotes are part of EmergencyContact if needed */}
+                        {/* {contact.isRisk && (
                           <div className="mt-1 p-1 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-md text-xs text-red-600 dark:text-red-400">
                             Risk indicator: {contact.riskNotes}
                           </div>
-                        )}
+                        )} */}
                       </div>
-                    ))}
+                    ))
+                  ) : (
+                    <p className="text-xs text-muted-foreground">No emergency contacts found for this student.</p>
+                  )}
                   </div>
                 </div>
 

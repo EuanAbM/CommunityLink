@@ -1,20 +1,25 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
+import Image from "next/image";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
-import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
+import { Separator } from "@/components/ui/separator";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import { CalendarIcon, Search, X, AlertTriangle, FileText, Upload } from "lucide-react";
+import { getInitials, getSafeguardingStatusColor } from "@/lib/utils";
+import { BodyMapMarker } from "@/components/incidents/body-map-marker";
 import { v4 as uuidv4 } from 'uuid';
+import { format } from "date-fns";
 
 interface Student {
   id: string;
@@ -26,6 +31,7 @@ interface Student {
   safeguarding_status?: string;
   sen_status?: string;
   has_confidential_information?: number;
+  emergencyContacts?: EmergencyContact[];
 }
 
 interface EmergencyContact {
@@ -45,107 +51,201 @@ interface EmergencyContact {
 }
 
 export default function TestFormPage() {
+  const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
-  const [isLoadingStudents, setIsLoadingStudents] = useState(true);
-  const [response, setResponse] = useState<any>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [isConfidential, setIsConfidential] = useState(false);
+  const [needsFollowUp, setNeedsFollowUp] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedStudent, setSelectedStudent] = useState<string | null>(null);
+  const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [students, setStudents] = useState<Student[]>([]);
   const [filteredStudents, setFilteredStudents] = useState<Student[]>([]);
-  const [emergencyContacts, setEmergencyContacts] = useState<EmergencyContact[]>([]);
+  const [isLoadingStudents, setIsLoadingStudents] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const searchTimeout = useRef<NodeJS.Timeout | null>(null);
   const [isLoadingContacts, setIsLoadingContacts] = useState(false);
-  
-// Fetch the list of students when the component loads
-useEffect(() => {
-  async function fetchStudents() {
-    setIsLoadingStudents(true);
-    try {
-      const response = await fetch("/api/students");
-      if (!response.ok) {
-        throw new Error("Failed to fetch students");
-      }
-      const data = await response.json();
-      setStudents(data);
-      setFilteredStudents(data); // Initialize filtered students
-    } catch (error) {
-      console.error("Error fetching students:", error);
-      setStudents([]);
-    } finally {
+  const [incidentCategories, setIncidentCategories] = useState<any[]>([]);
+  const [incidentSubcategories, setIncidentSubcategories] = useState<any[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [selectedSubcategory, setSelectedSubcategory] = useState<string | null>(null);
+  const [locations, setLocations] = useState<any[]>([]);
+  const [staffList, setStaffList] = useState<any[]>([]);
+  const [incidentDate, setIncidentDate] = useState<Date | undefined>(new Date());
+  const [incidentTime, setIncidentTime] = useState("");
+  const [bodyMapMarkers, setBodyMapMarkers] = useState<
+    {
+      id: string;
+      x: number;
+      y: number;
+      note: string;
+      view: "front" | "back";
+    }[]
+  >([]);
+  const [selectedMarker, setSelectedMarker] = useState<string | null>(null);
+  const [markerNote, setMarkerNote] = useState("");
+  const [emergencyContacts, setEmergencyContacts] = useState<EmergencyContact[]>([]);
+  const [response, setResponse] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // AJAX search for students
+  useEffect(() => {
+    const searchTerm = searchQuery.trim().toLowerCase();
+    
+    if (searchTerm.length < 2) {
+      setFilteredStudents([]);
       setIsLoadingStudents(false);
-    }
-  }
-
-  fetchStudents();
-}, []);
-
-// Fetch student details when a student is selected
-useEffect(() => {
-  async function fetchStudentDetailsAndContacts() {
-    if (!selectedStudent) {
-      setEmergencyContacts([]);
       return;
     }
 
-    setIsLoadingContacts(true);
-    try {
-      // Use the existing full-profile endpoint which includes both student details and emergency contacts
-      const response = await fetch(`/api/students/${selectedStudent}/full-profile`);
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to fetch student profile: ${response.status} ${response.statusText} - ${errorText}`);
-      }
+    setIsLoadingStudents(true);
+    setSearching(true);
 
-      const profileData = await response.json();
-      console.log("Fetched student profile:", profileData);
-
-      // Update student details if needed
-      if (profileData.student) {
-        setStudents((prevStudents) =>
-          prevStudents.map((student) =>
-            student.id === selectedStudent ? { ...student, ...profileData.student } : student
-          )
+    if (searchTimeout.current) clearTimeout(searchTimeout.current);
+    searchTimeout.current = setTimeout(async () => {
+      try {
+        const response = await fetch(`/api/students?search=${encodeURIComponent(searchTerm)}`);
+        if (!response.ok) throw new Error("Failed to fetch students");
+        const data = await response.json();
+        const arr = Array.isArray(data) ? data : [];
+        const filtered = arr.filter((student: Student) =>
+          (student.first_name?.toLowerCase().startsWith(searchTerm) ||
+            student.last_name?.toLowerCase().startsWith(searchTerm) ||
+            student.id?.toLowerCase().startsWith(searchTerm))
         );
+        setStudents(arr);
+        setFilteredStudents(filtered);
+      } catch (error) {
+        setStudents([]);
+        setFilteredStudents([]);
+      } finally {
+        setIsLoadingStudents(false);
+        setSearching(false);
       }
+    }, 300);
 
-      // Set emergency contacts directly from the profile data
-      if (Array.isArray(profileData.emergencyContacts)) {
-        setEmergencyContacts(profileData.emergencyContacts);
-      } else {
-        console.warn("No emergency contacts found in profile data");
-        setEmergencyContacts([]);
-      }
-    } catch (error) {
-      console.error("Error fetching student profile:", error);
-      setError("Failed to load student details or emergency contacts. Please try again.");
-      setEmergencyContacts([]);
-    } finally {
-      setIsLoadingContacts(false);
-    }
-  }
+    return () => {
+      if (searchTimeout.current) clearTimeout(searchTimeout.current);
+    };
+  }, [searchQuery]);
 
-  fetchStudentDetailsAndContacts();
-}, [selectedStudent]);
-
-  // Filter students based on search query
+  // Fetch student details and merge emergency contacts into selectedStudent
   useEffect(() => {
-    if (searchQuery.trim() === "") {
-      setFilteredStudents(students);
-    } else {
-      const query = searchQuery.toLowerCase();
-      const filtered = students.filter(student => 
-        student.first_name?.toLowerCase().includes(query) ||
-        student.last_name?.toLowerCase().includes(query) ||
-        student.id?.includes(query)
-      );
-      setFilteredStudents(filtered);
+    async function fetchStudentDetailsAndContacts() {
+      if (!selectedStudent) return;
+      setIsLoadingContacts(true);
+      try {
+        const response = await fetch(`/api/students/${selectedStudent.id}/full-profile`);
+        if (!response.ok) throw new Error("Failed to fetch student profile");
+        const profileData = await response.json();
+        setSelectedStudent({
+          ...selectedStudent,
+          ...profileData.student,
+          emergencyContacts: profileData.emergencyContacts || [],
+        });
+        setEmergencyContacts(profileData.emergencyContacts || []);
+      } catch (error) {
+        setSelectedStudent(prev => prev ? { ...prev, emergencyContacts: [] } : null);
+        setEmergencyContacts([]);
+      } finally {
+        setIsLoadingContacts(false);
+      }
     }
-  }, [searchQuery, students]);
+    if (selectedStudent) fetchStudentDetailsAndContacts();
+  }, [selectedStudent?.id]);
 
-  const getSelectedStudentDetails = () => {
-    if (!selectedStudent) return null;
-    return students.find(student => student.id === selectedStudent);
+  // Fetch incident categories from API on mount
+  useEffect(() => {
+    async function fetchCategories() {
+      try {
+        const res = await fetch("/api/reporting_categories");
+        if (!res.ok) throw new Error("Failed to fetch categories");
+        const data = await res.json();
+        setIncidentCategories(Array.isArray(data) ? data : []);
+      } catch (err) {
+        setIncidentCategories([]);
+      }
+    }
+    fetchCategories();
+  }, []);
+
+  // Add this helper to get the selected category/subcategory objects
+  const selectedCategoryObj = incidentCategories.find(cat => cat.id === selectedCategory);
+  const selectedSubcategoryObj = incidentSubcategories.find(sub => sub.id === selectedSubcategory);
+
+  // Fetch subcategories when category changes
+  useEffect(() => {
+    if (!selectedCategory) {
+      setIncidentSubcategories([]);
+      setSelectedSubcategory(null);
+      return;
+    }
+    // Example: fetch subcategories for the selected category
+    async function fetchSubcategories() {
+      try {
+        const res = await fetch(`/api/reporting_subcategories?categoryId=${selectedCategory}`);
+        if (!res.ok) throw new Error("Failed to fetch subcategories");
+        const data = await res.json();
+        setIncidentSubcategories(Array.isArray(data) ? data : []);
+        setSelectedSubcategory(null);
+      } catch {
+        setIncidentSubcategories([]);
+        setSelectedSubcategory(null);
+      }
+    }
+    fetchSubcategories();
+  }, [selectedCategory]);
+
+  const handleStudentSelect = (student: Student) => {
+    setSelectedStudent(student);
+    setSearchQuery("");
   };
+
+  // Body map marker handling
+  const handleBodyMapClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const xPercent = (x / rect.width) * 100;
+    const yPercent = (y / rect.height) * 100;
+    const newMarker = {
+      id: `marker-${Date.now()}`,
+      x: xPercent,
+      y: yPercent,
+      note: "",
+      view: "front",
+    };
+    setBodyMapMarkers([...bodyMapMarkers, newMarker]);
+    setSelectedMarker(newMarker.id);
+    setMarkerNote("");
+  };
+
+  const saveMarkerNote = () => {
+    if (selectedMarker && markerNote.trim()) {
+      setBodyMapMarkers(
+        bodyMapMarkers.map((marker) => (marker.id === selectedMarker ? { ...marker, note: markerNote } : marker))
+      );
+      setSelectedMarker(null);
+      setMarkerNote("");
+    }
+  };
+
+  const removeMarker = (id: string) => {
+    setBodyMapMarkers(bodyMapMarkers.filter((marker) => marker.id !== id));
+    if (selectedMarker === id) {
+      setSelectedMarker(null);
+      setMarkerNote("");
+    }
+  };
+
+  function getAgeFromDOB(dateOfBirth: string): number {
+    const today = new Date();
+    const birthDate = new Date(dateOfBirth);
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const month = today.getMonth() - birthDate.getMonth();
+    if (month < 0 || (month === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+    return age;
+  }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -165,9 +265,8 @@ useEffect(() => {
     const incidentId = uuidv4();
 
     // Format the data according to the expected structure for the API
-    // Try a completely different payload structure that doesn't nest students inside incident
     const formValues = {
-      id: incidentId, // <-- Add this line
+      id: incidentId,
       details: formData.get("details"),
       incident_date: formData.get("incidentDate"),
       incident_time: formData.get("incidentTime"),
@@ -301,314 +400,538 @@ useEffect(() => {
     }
   }
 
-  const selectedStudentDetails = getSelectedStudentDetails();
-
   return (
-    <div className="container py-8">
-      <h1 className="text-2xl font-bold mb-6">Test Incident Form</h1>
-      
-      <div className="grid md:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>Simple Incident Form</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form id="test-form" onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} className="space-y-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Left column - Main form */}
+        <div className="lg:col-span-2 space-y-6">
+          {/* Student search section */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Student Information</CardTitle>
+              <CardDescription>Search and select the primary student involved in this incident</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
               {/* Student Search */}
               <div className="space-y-2">
-                <Label htmlFor="studentSearch">Student Search</Label>
-                <Input 
-                  id="studentSearch"
+                <Label htmlFor="student-search">Student Search</Label>
+                <Input
+                  id="student-search"
                   placeholder="Search by name or ID"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="mb-2"
                 />
-                
-                <Select 
-                  value={selectedStudent || ''} 
-                  onValueChange={setSelectedStudent}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder={isLoadingStudents ? "Loading students..." : "Select a student"} />
+                {/* Results */}
+                <div className="mt-2 space-y-2">
+                  {isLoadingStudents ? (
+                    <div className="text-sm text-gray-500">Loading...</div>
+                  ) : searchQuery.length < 2 ? (
+                    <div className="text-sm text-gray-500">Type at least 2 characters to search</div>
+                  ) : filteredStudents.length === 0 ? (
+                    <div className="text-sm text-gray-500">No students found</div>
+                  ) : (
+                    <div className="grid gap-2">
+                      {filteredStudents.map(student => (
+                        <Card
+                          key={student.id}
+                          className={`cursor-pointer hover:bg-gray-50 transition-colors ${
+                            selectedStudent?.id === student.id ? 'border-blue-500 bg-blue-50' : ''
+                          }`}
+                          onClick={() => handleStudentSelect(student)}
+                        >
+                          <CardContent className="p-4">
+                            <div className="flex justify-between items-start">
+                              <div>
+                                <div className="font-medium">
+                                  {student.first_name} {student.last_name}
+                                </div>
+                                <div className="text-sm text-gray-500">
+                                  ID: {student.id}
+                                </div>
+                                {student.year_group && (
+                                  <div className="text-sm text-gray-500">
+                                    Year: {student.year_group}
+                                  </div>
+                                )}
+                              </div>
+                              {selectedStudent?.id === student.id && (
+                                <div className="text-blue-500">
+                                  ✓
+                                </div>
+                              )}
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {searching && <div className="text-xs text-gray-500 mt-1">Searching...</div>}
+              </div>
+              
+              {selectedStudent && (
+                <div className="p-4 border rounded-md bg-muted/30">
+                  <div className="flex items-center gap-3">
+                    <Avatar className="h-10 w-10">
+                      <AvatarFallback>
+                        {getInitials(selectedStudent.first_name, selectedStudent.last_name)}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1">
+                      <p className="font-medium">
+                        {selectedStudent.first_name} {selectedStudent.last_name}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        {selectedStudent.year_group} • {selectedStudent.tutor}
+                      </p>
+                    </div>
+                    <Badge variant="outline" className={getSafeguardingStatusColor(selectedStudent.safeguarding_status)}>
+                      {selectedStudent.safeguarding_status || "None"}
+                    </Badge>
+                    <Button type="button" variant="ghost" size="icon" onClick={() => setSelectedStudent(null)}>
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  {/* Emergency Contacts */}
+                  <div className="space-y-2 mt-4">
+                    <Label>Emergency Contacts</Label>
+                    <div className="space-y-2">
+                      {selectedStudent.emergencyContacts && selectedStudent.emergencyContacts.length > 0 ? selectedStudent.emergencyContacts.map((contact) => (
+                        <div key={contact.id} className="text-sm border rounded p-2">
+                          <div className="flex justify-between">
+                            <span className="font-medium">{contact.first_name} {contact.last_name}</span>
+                            <span className="text-muted-foreground">{contact.relationship}</span>
+                          </div>
+                          <div className="text-muted-foreground">{contact.phone} | {contact.email}</div>
+                          <div className="text-xs">{contact.address_line_1} {contact.town} {contact.postcode}</div>
+                        </div>
+                      )) : <div className="text-xs text-muted-foreground">No emergency contacts found.</div>}
+                    </div>
+                  </div>
+                </div>
+              )}
+              {/* ...linked students UI if needed... */}
+            </CardContent>
+          </Card>
+          {/* Incident details section */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Incident Details</CardTitle>
+              <CardDescription>Provide information about when and where the incident occurred</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Incident Category */}
+                <div className="space-y-2">
+                  <Label htmlFor="incident-category">Incident Category</Label>
+                  <Select
+                    value={selectedCategory ?? ""}
+                    onValueChange={setSelectedCategory}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {incidentCategories.map(cat => (
+                        <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {/* Incident Subcategory */}
+                <div className="space-y-2">
+                  <Label htmlFor="incident-subcategory">Subcategory</Label>
+                  <Select
+                    value={selectedSubcategory ?? ""}
+                    onValueChange={setSelectedSubcategory}
+                    disabled={!selectedCategory || incidentSubcategories.length === 0}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select subcategory" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {incidentSubcategories.map(sub => (
+                        <SelectItem key={sub.id} value={sub.id}>{sub.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {/* Location */}
+                <div className="space-y-2">
+                  <Label htmlFor="location">Location</Label>
+                  <Select>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select location" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {locations.map(loc => (
+                        <SelectItem key={loc.id} value={loc.id}>{loc.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {/* Date */}
+                <div className="space-y-2">
+                  <Label htmlFor="incident_date">Date of Incident</Label>
+                  <Input
+                    id="incident_date"
+                    name="incidentDate"
+                    type="date"
+                    placeholder="Select date"
+                    value={incidentDate ? format(incidentDate, "yyyy-MM-dd") : ""}
+                    onChange={(e) => setIncidentDate(e.target.value ? new Date(e.target.value) : undefined)}
+                  />
+                </div>
+                {/* Time */}
+                <div className="space-y-2">
+                  <Label htmlFor="incident_time">Time of Incident</Label>
+                  <Input
+                    id="incident_time"
+                    name="incidentTime"
+                    type="time"
+                    placeholder="Select time"
+                    value={incidentTime}
+                    onChange={(e) => setIncidentTime(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="description">Incident Details</Label>
+                <Textarea
+                  id="description"
+                  name="details"
+                  placeholder="Describe the incident in detail..."
+                  className="min-h-[120px]"
+                  required
+                />
+              </div>
+              {/* Witness Staff */}
+              <div className="space-y-2">
+                <Label>Witness Staff</Label>
+                <Select multiple>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select witness staff" />
                   </SelectTrigger>
                   <SelectContent>
-                    {filteredStudents.map(student => (
-                      <SelectItem key={student.id} value={student.id}>
-                        {student.first_name} {student.last_name} ({student.id})
+                    {staffList.map(staff => (
+                      <SelectItem key={staff.id} value={staff.id}>
+                        {staff.first_name} {staff.last_name} ({staff.job_title})
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
-              
+              {/* Staff to Notify */}
               <div className="space-y-2">
-                <Label htmlFor="details">Incident Details</Label>
-                <Textarea 
-                  id="details" 
-                  name="details" 
-                  placeholder="Describe the incident..." 
-                  required
-                />
+                <Label>Staff to Notify</Label>
+                <Select>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select staff to notify" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {staffList.map(staff => (
+                      <SelectItem key={staff.id} value={staff.id}>
+                        {staff.first_name} {staff.last_name} ({staff.job_title})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
-              
-              <div className="grid grid-cols-2 gap-4">
+              <div className="flex items-center space-x-2">
+                <Switch 
+                  id="followup" 
+                  name="requiresFollowUp"
+                  checked={needsFollowUp} 
+                  onCheckedChange={setNeedsFollowUp} 
+                />
+                <Label htmlFor="followup">Requires follow-up</Label>
+              </div>
+              {needsFollowUp && (
                 <div className="space-y-2">
-                  <Label htmlFor="incidentDate">Date</Label>
-                  <Input 
-                    id="incidentDate" 
-                    name="incidentDate" 
-                    type="date" 
-                    defaultValue={new Date().toISOString().split('T')[0]} 
-                    required
+                  <Label htmlFor="followup-notes">Follow-up Notes</Label>
+                  <Textarea 
+                    id="followup-notes"
+                    name="followupNotes" 
+                    placeholder="Notes for follow-up actions..." 
+                    className="min-h-[80px]" 
                   />
                 </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="incidentTime">Time</Label>
-                  <Input 
-                    id="incidentTime" 
-                    name="incidentTime" 
-                    type="time" 
-                    defaultValue="12:00" 
-                    required
-                  />
-                </div>
-              </div>
-              
-              <div className="space-y-2">
-                <Label htmlFor="actionsTaken">Actions Taken</Label>
-                <Textarea 
-                  id="actionsTaken" 
-                  name="actionsTaken" 
-                  placeholder="What actions have been taken so far?"
+              )}
+              <div className="flex items-center space-x-2">
+                <Switch 
+                  id="confidential" 
+                  name="isConfidential"
+                  checked={isConfidential} 
+                  onCheckedChange={setIsConfidential} 
                 />
+                <Label htmlFor="confidential">Mark as confidential</Label>
               </div>
-              
-              <div className="flex items-center space-x-2">
-                <Switch id="requiresFollowUp" name="requiresFollowUp" />
-                <Label htmlFor="requiresFollowUp">Requires follow-up</Label>
-              </div>
-              
-              <div className="flex items-center space-x-2">
-                <Switch id="isConfidential" name="isConfidential" />
-                <Label htmlFor="isConfidential">Confidential</Label>
-              </div>
-              
-              <div className="flex items-center space-x-2">
-                <Switch id="urgent" name="urgent" />
-                <Label htmlFor="urgent">Urgent</Label>
-              </div>
-              
-              {/* Hidden field to ensure student role is always 'involved' */}
-              <input type="hidden" name="studentRole" value="involved" />
-            </form>
-          </CardContent>
-          <CardFooter className="flex justify-between">
-            <Button
-              type="reset"
-              form="test-form"
-              variant="outline" 
-              onClick={() => {
-                setSearchQuery("");
-                setSelectedStudent(null);
-                setEmergencyContacts([]);
-              }}
-            >
-              Reset
-            </Button>
-            <Button type="submit" form="test-form" disabled={isLoading}>
-              {isLoading ? "Submitting..." : "Test Submit"}
-            </Button>
-          </CardFooter>
-        </Card>
-        
-        {/* Student Information and Emergency Contacts */}
-        <div className="space-y-6">
-          {selectedStudentDetails && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">
-                  Student Information
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  <div className="grid grid-cols-2 gap-1">
-                    <div className="text-sm font-medium">Student ID:</div>
-                    <div>{selectedStudentDetails.id}</div>
+              {isConfidential && (
+                <p className="text-sm text-muted-foreground">
+                  This incident will only be visible to users with appropriate permissions.
+                </p>
+              )}
+              <div className="space-y-2">
+                <Label>Attachments</Label>
+                <div className="border-2 border-dashed rounded-md p-6 text-center">
+                  <div className="flex flex-col items-center gap-2">
+                    <Upload className="h-8 w-8 text-muted-foreground" />
+                    <p className="text-sm font-medium">Drag files here or click to upload</p>
+                    <p className="text-xs text-muted-foreground">Support for images, documents, and PDF files</p>
+                    <Button type="button" variant="outline" size="sm" className="mt-2">
+                      Select Files
+                    </Button>
                   </div>
-                  <div className="grid grid-cols-2 gap-1">
-                    <div className="text-sm font-medium">Name:</div>
-                    <div>{selectedStudentDetails.first_name} {selectedStudentDetails.last_name}</div>
-                  </div>
-                  {selectedStudentDetails.year_group && (
-                    <div className="grid grid-cols-2 gap-1">
-                      <div className="text-sm font-medium">Year Group:</div>
-                      <div>{selectedStudentDetails.year_group}</div>
-                    </div>
-                  )}
-                  {selectedStudentDetails.tutor && (
-                    <div className="grid grid-cols-2 gap-1">
-                      <div className="text-sm font-medium">Tutor:</div>
-                      <div>{selectedStudentDetails.tutor}</div>
-                    </div>
-                  )}
-                  {selectedStudentDetails.date_of_birth && (
-                    <div className="grid grid-cols-2 gap-1">
-                      <div className="text-sm font-medium">Date of Birth:</div>
-                      <div>{new Date(selectedStudentDetails.date_of_birth).toLocaleDateString()}</div>
-                    </div>
-                  )}
-                  {selectedStudentDetails.safeguarding_status && (
-                    <div className="grid grid-cols-2 gap-1">
-                      <div className="text-sm font-medium">Safeguarding:</div>
-                      <div>{selectedStudentDetails.safeguarding_status}</div>
-                    </div>
-                  )}
-                  {selectedStudentDetails.sen_status && (
-                    <div className="grid grid-cols-2 gap-1">
-                      <div className="text-sm font-medium">SEN Status:</div>
-                      <div>{selectedStudentDetails.sen_status}</div>
-                    </div>
-                  )}
-                  {selectedStudentDetails.has_confidential_information === 1 && (
-                    <div className="bg-yellow-50 p-2 border border-yellow-200 rounded mt-2">
-                      <div className="text-amber-700 font-medium">
-                        This student has confidential information
-                      </div>
-                    </div>
-                  )}
                 </div>
-              </CardContent>
-            </Card>
-          )}
+                <div className="mt-4 space-y-2">
+                  <div className="flex items-center justify-between p-2 border rounded-md">
+                    <div className="flex items-center gap-2">
+                      <FileText className="h-4 w-4 text-blue-500" />
+                      <span className="text-sm">body-map.png</span>
+                    </div>
+                    <Button type="button" variant="ghost" size="icon">
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center space-x-2">
+                <Checkbox id="immediate-risk" name="urgent" />
+                <Label htmlFor="immediate-risk" className="font-medium text-red-600 dark:text-red-400">
+                  Immediate Risk - Requires urgent attention
+                </Label>
+              </div>
+            </CardContent>
+          </Card>
           
-          {selectedStudent && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Emergency Contacts</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {isLoadingContacts ? (
-                  <p>Loading emergency contacts...</p>
-                ) : emergencyContacts.length > 0 ? (
-                  <div className="space-y-4">
-                    {emergencyContacts.map(contact => (
-                      <div key={contact.id} className="border-b pb-3 last:border-0">
-                        <h4 className="font-medium">
-                          {contact.first_name} {contact.last_name} ({contact.relationship})
-                        </h4>
-                        <div className="grid grid-cols-1 gap-1 mt-2 text-sm">
-                          <div className="grid grid-cols-2 gap-1">
-                            <div className="font-medium">Phone:</div>
-                            <div>{contact.phone}</div>
-                          </div>
-                          <div className="grid grid-cols-2 gap-1">
-                            <div className="font-medium">Email:</div>
-                            <div>{contact.email}</div>
-                          </div>
-                          {contact.address_line_1 && (
-                            <div className="mt-1">
-                              <div className="font-medium">Address:</div>
-                              <div className="pl-4">
-                                <p>{contact.address_line_1}</p>
-                                {contact.address_line_2 && <p>{contact.address_line_2}</p>}
-                                {contact.town && contact.postcode && (
-                                  <p>{contact.town}, {contact.postcode}</p>
-                                )}
-                                {contact.county && <p>{contact.county}</p>}
-                                {contact.country && <p>{contact.country}</p>}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
+          {/* Body map section */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Body Map</CardTitle>
+              <CardDescription>Click on the body map to mark and describe any physical concerns</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-col md:flex-row gap-6">
+                <div
+                  className="relative border rounded-md overflow-hidden cursor-crosshair bg-white dark:bg-gray-800 w-full md:w-1/2 h-[400px]"
+                  onClick={(e) => handleBodyMapClick(e)}
+                >
+                  <div className="relative w-full h-full">
+                    <Image src="/images/body-map.png" alt="Body map" fill style={{ objectFit: "contain" }} />
+                    {/* Place markers */}
+                    {bodyMapMarkers.map((marker, index) => (
+                      <BodyMapMarker
+                        key={marker.id}
+                        marker={marker}
+                        index={index + 1}
+                        onClick={() => {
+                          setSelectedMarker(marker.id);
+                          setMarkerNote(marker.note);
+                        }}
+                      />
                     ))}
                   </div>
-                ) : (
-                  <div className="text-center py-4 text-gray-500">
-                    No emergency contacts found for this student
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          )}
-          
-          {response && (
-            <Card className={`mt-6 ${response.status === "Success" ? "bg-green-50 border-green-200" : 
-                                    response.status === "Error" ? "bg-red-50 border-red-200" : 
-                                    "bg-blue-50 border-blue-200"}`}>
-              <CardHeader>
-                <CardTitle className={`${
-                  response.status === "Success" ? "text-green-800" : 
-                  response.status === "Error" ? "text-red-800" : 
-                  "text-blue-800"
-                }`}>
-                  {response.status === "Success" ? "Success!" : 
-                   response.status === "Error" ? "Error Details" : 
-                   "Submission Details"}
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  {/* Request Payload */}
-                  <div>
-                    <h4 className="font-medium mb-1">Request Payload:</h4>
-                    <pre className="p-2 bg-white rounded text-sm overflow-auto max-h-40 border">
-                      {JSON.stringify(response.requestPayload, null, 2)}
-                    </pre>
-                  </div>
-                  
-                  {/* Response Data */}
-                  {response.responseData && (
-                    <div>
-                      <h4 className="font-medium mb-1">Response Data:</h4>
-                      <pre className="p-2 bg-white rounded text-sm overflow-auto max-h-40 border">
-                        {JSON.stringify(response.responseData, null, 2)}
-                      </pre>
+                </div>
+                <div className="flex-1 space-y-4">
+                  {selectedMarker ? (
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="marker-note">
+                          Add note for marker {bodyMapMarkers.findIndex((m) => m.id === selectedMarker) + 1}
+                        </Label>
+                        <Textarea
+                          id="marker-note"
+                          placeholder="Describe the mark or injury..."
+                          value={markerNote}
+                          onChange={(e) => setMarkerNote(e.target.value)}
+                          className="min-h-[100px]"
+                        />
+                      </div>
+                      <div className="flex gap-2">
+                        <Button type="button" onClick={saveMarkerNote}>
+                          Save Note
+                        </Button>
+                        <Button type="button" variant="outline" onClick={() => removeMarker(selectedMarker)}>
+                          Remove Marker
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-muted-foreground text-sm">
+                      <p>Click on the body map to add a marker for injuries or concerns.</p>
+                      {bodyMapMarkers.length > 0 && (
+                        <div className="mt-4 space-y-2">
+                          <h4 className="font-medium">Markers:</h4>
+                          <ul className="space-y-1">
+                            {bodyMapMarkers.map((marker, index) => (
+                              <li key={marker.id} className="flex items-start gap-2">
+                                <span className="bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs flex-shrink-0">
+                                  {index + 1}
+                                </span>
+                                <span>{marker.note || "No note added"}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
                     </div>
                   )}
-                  
-                  {/* Error Information */}
-                  {response.status === "Error" && (
-                    <>
-                      {response.responseStatus && (
-                        <p className="text-red-700">Status Code: {response.responseStatus}</p>
-                      )}
-                      {response.responseText && (
-                        <div>
-                          <h4 className="font-medium mb-1">Raw Response:</h4>
-                          <pre className="p-2 bg-white rounded text-sm overflow-auto max-h-40 border">
-                            {response.responseText}
-                          </pre>
-                        </div>
-                      )}
-                      {response.parsedResponse && (
-                        <div>
-                          <h4 className="font-medium mb-1">Parsed Response:</h4>
-                          <pre className="p-2 bg-white rounded text-sm overflow-auto max-h-40 border">
-                            {JSON.stringify(response.parsedResponse, null, 2)}
-                          </pre>
-                        </div>
-                      )}
-                    </>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+        
+        {/* Right column - Student details and actions */}
+        <div className="space-y-6">
+          {selectedStudent ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Student Details</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center gap-4">
+                  <Avatar className="h-16 w-16">
+                    <AvatarFallback>{getInitials(selectedStudent.first_name, selectedStudent.last_name)}</AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <h3 className="text-lg font-medium">
+                      {selectedStudent.first_name} {selectedStudent.last_name}
+                    </h3>
+                    <p className="text-sm text-muted-foreground">
+                      {selectedStudent.year_group} • Tutor: {selectedStudent.tutor}
+                    </p>
+                  </div>
+                </div>
+                <Separator />
+                <div className="space-y-3">
+                  <div className="flex justify-between">
+                    <span className="text-sm text-muted-foreground">Date of Birth:</span>
+                    <span className="text-sm">
+                      {selectedStudent.date_of_birth ? format(new Date(selectedStudent.date_of_birth), "PPP") : ""}
+                      <span className="ml-1 text-muted-foreground">
+                        {selectedStudent.date_of_birth ? `(Age: ${getAgeFromDOB(selectedStudent.date_of_birth)})` : ""}
+                      </span>
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm text-muted-foreground">Safeguarding Status:</span>
+                    <Badge variant="outline" className={getSafeguardingStatusColor(selectedStudent.safeguarding_status)}>
+                      {selectedStudent.safeguarding_status || "None"}
+                    </Badge>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm text-muted-foreground">SEN Status:</span>
+                    <span className="text-sm">{selectedStudent.sen_status || "None"}</span>
+                  </div>
+                  {selectedStudent.has_confidential_information && (
+                    <div className="flex items-center gap-2 p-2 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-md text-sm">
+                      <AlertTriangle className="h-4 w-4 text-amber-500" />
+                      <span>Contains confidential information</span>
+                    </div>
                   )}
+                </div>
+                <Separator />
+                <div className="space-y-2">
+                  <h4 className="text-sm font-medium">Emergency Contacts</h4>
+                  <div className="space-y-2">
+                    {selectedStudent.emergencyContacts && selectedStudent.emergencyContacts.length > 0 ? selectedStudent.emergencyContacts.map((contact) => (
+                      <div key={contact.id} className="text-sm">
+                        <div className="flex justify-between">
+                          <span className="font-medium">{contact.first_name} {contact.last_name}</span>
+                          <span className="text-muted-foreground">{contact.relationship}</span>
+                        </div>
+                        <p className="text-muted-foreground">{contact.phone}</p>
+                      </div>
+                    )) : (
+                      <div className="text-xs text-muted-foreground">No emergency contacts found.</div>
+                    )}
+                  </div>
+                </div>
+                <Button asChild variant="outline" className="w-full">
+                  <Link href={`/students/${selectedStudent.id}`}>View Full Profile</Link>
+                </Button>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card>
+              <CardContent className="p-6">
+                <div className="flex flex-col items-center justify-center text-center space-y-2">
+                  <Search className="h-8 w-8 text-muted-foreground/60" />
+                  <h3 className="font-medium">No Student Selected</h3>
+                  <p className="text-sm text-muted-foreground">Search and select a student to view their details</p>
                 </div>
               </CardContent>
             </Card>
           )}
-          
+          <Card>
+            <CardHeader>
+              <CardTitle>Quick Actions</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <Button asChild className="w-full justify-start" variant="outline">
+                <Link href="/dashboard">
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  Return to Dashboard
+                </Link>
+              </Button>
+              <Button asChild className="w-full justify-start" variant="outline">
+                <Link href="/incidents">
+                  <FileText className="mr-2 h-4 w-4" />
+                  View All Incidents
+                </Link>
+              </Button>
+              {selectedStudent && (
+                <Button asChild className="w-full justify-start" variant="outline">
+                  <Link href={`/incidents?studentId=${selectedStudent.id}`}>
+                    <FileText className="mr-2 h-4 w-4" />
+                    View Student Incidents
+                  </Link>
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Submit Report</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Once submitted, this incident will be recorded in the system and appropriate staff will be notified
+                based on your school's workflow rules.
+              </p>
+              <div className="flex flex-col gap-2">
+                <Button type="submit" disabled={isLoading || !selectedStudent}>
+                  {isLoading ? "Submitting..." : "Submit Incident Report"}
+                </Button>
+                <Button type="button" variant="secondary">
+                  Save Draft
+                </Button>
+                <Button type="button" variant="outline" onClick={() => router.push("/dashboard")}>
+                  Cancel
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
           {error && (
-            <Card className="mt-6 bg-red-50 border-red-200">
-              <CardContent className="pt-6">
-                <h3 className="font-medium text-red-800">Error</h3>
-                <p className="mt-2">{error}</p>
+            <Card className="border-red-300">
+              <CardContent className="pt-4">
+                <p className="text-red-600 whitespace-pre-wrap text-sm">{error}</p>
+              </CardContent>
+            </Card>
+          )}
+          {response && (
+            <Card className="border-blue-200">
+              <CardContent className="pt-4">
+                <pre className="text-xs overflow-auto max-h-[200px]">
+                  {JSON.stringify(response, null, 2)}
+                </pre>
               </CardContent>
             </Card>
           )}
         </div>
       </div>
-    </div>
+    </form>
   );
 }
