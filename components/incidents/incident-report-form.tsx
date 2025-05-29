@@ -1,32 +1,28 @@
 "use client"
 
-import type React from "react"
-
-import { useState, useEffect, useRef } from "react"
-import { useRouter } from "next/navigation"
-import Image from "next/image"
-import Link from "next/link"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Checkbox } from "@/components/ui/checkbox"
-import { Switch } from "@/components/ui/switch"
-import { Separator } from "@/components/ui/separator"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Badge } from "@/components/ui/badge"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Calendar } from "@/components/ui/calendar"
-import { format } from "date-fns"
-import { CalendarIcon, Search, X, AlertTriangle, FileText, Upload } from "lucide-react"
-import { useToast } from "@/hooks/use-toast"
-import { getInitials, getSafeguardingStatusColor } from "@/lib/utils"
-import { BodyMapMarker } from "@/components/incidents/body-map-marker"
-import type { Student } from "@/lib/types"
+import { useState, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
+import Image from "next/image";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
+import { Separator } from "@/components/ui/separator";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { format } from "date-fns";
+import { CalendarIcon, Search, X, AlertTriangle, FileText, Upload } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { getInitials, getSafeguardingStatusColor } from "@/lib/utils";
+import { BodyMapMarker } from "@/components/incidents/body-map-marker";
 import { v4 as uuidv4 } from 'uuid';
-
 
 interface Student {
   id: string;
@@ -38,7 +34,7 @@ interface Student {
   safeguarding_status?: string;
   sen_status?: string;
   has_confidential_information?: number;
-  emergencyContacts?: EmergencyContact[]; // Add this for consistency
+  emergencyContacts?: EmergencyContact[];
 }
 
 interface EmergencyContact {
@@ -65,56 +61,47 @@ interface BodyMapMarkerData {
 }
 
 export function IncidentReportForm() {
-  const { toast } = useToast()
-  const router = useRouter()
-  const [isLoading, setIsLoading] = useState(false)
-  const [isConfidential, setIsConfidential] = useState(false)
-  const [needsFollowUp, setNeedsFollowUp] = useState(false)
-  
-  // Student search state (primary student)
+  const { toast } = useToast();
+  const router = useRouter();
+  const [isLoading, setIsLoading] = useState(false);
+  const [isConfidential, setIsConfidential] = useState(false);
+  const [needsFollowUp, setNeedsFollowUp] = useState(false);
+
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
-  const [students, setStudents] = useState<Student[]>([]); // This can be general student list from API
-  const [filteredStudents, setFilteredStudents] = useState<Student[]>([]); // For primary student search results
-  const [isLoadingStudents, setIsLoadingStudents] = useState(false); // For primary student search
-  const [searching, setSearching] = useState(false); // For primary student search
+  const [students, setStudents] = useState<Student[]>([]);
+  const [filteredStudents, setFilteredStudents] = useState<Student[]>([]);
+  const [isLoadingStudents, setIsLoadingStudents] = useState(false);
+  const [searching, setSearching] = useState(false);
   const searchTimeout = useRef<NodeJS.Timeout | null>(null);
-  
-  const [isLoadingContacts, setIsLoadingContacts] = useState(false)
-  const [incidentCategories, setIncidentCategories] = useState<any[]>([])
-  const [incidentSubcategories, setIncidentSubcategories] = useState<any[]>([])
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
-  const [locations, setLocations] = useState<any[]>([])
-  const [staffList, setStaffList] = useState<any[]>([])
 
-  // State for linked students
-  const [linkedStudents, setLinkedStudents] = useState<Student[]>([]);
-  const [linkedStudentSearchQuery, setLinkedStudentSearchQuery] = useState<string>("");
-  const [filteredLinkedStudents, setFilteredLinkedStudents] = useState<Student[]>([]);
-  const [isLoadingLinkedStudentSearch, setIsLoadingLinkedStudentSearch] = useState<boolean>(false);
-  const [searchingLinked, setSearchingLinked] = useState<boolean>(false);
-  const linkedSearchTimeout = useRef<NodeJS.Timeout | null>(null);
+  const [isLoadingContacts, setIsLoadingContacts] = useState(false);
+  const [incidentCategories, setIncidentCategories] = useState<any[]>([]);
+  const [incidentSubcategories, setIncidentSubcategories] = useState<any[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [locations, setLocations] = useState<any[]>([]);
+  const [staffList, setStaffList] = useState<any[]>([]);
 
-  // State for incident date and time
   const [incidentDate, setIncidentDate] = useState<Date | undefined>(undefined);
   const [incidentTime, setIncidentTime] = useState<string>("");
 
-  // State for body map
   const [bodyMapMarkers, setBodyMapMarkers] = useState<BodyMapMarkerData[]>([]);
   const [selectedMarker, setSelectedMarker] = useState<string | null>(null);
   const [markerNote, setMarkerNote] = useState<string>("");
 
-
-  // AJAX search for primary students
+  // ✅ MATCHING TEST FORM SEARCH LOGIC
   useEffect(() => {
     const searchTerm = searchQuery.trim().toLowerCase();
+
     if (searchTerm.length < 2) {
       setFilteredStudents([]);
       setIsLoadingStudents(false);
       return;
     }
+
     setIsLoadingStudents(true);
     setSearching(true);
+
     if (searchTimeout.current) clearTimeout(searchTimeout.current);
     searchTimeout.current = setTimeout(async () => {
       try {
@@ -122,71 +109,28 @@ export function IncidentReportForm() {
         if (!response.ok) throw new Error("Failed to fetch students");
         const data = await response.json();
         const arr = Array.isArray(data) ? data : [];
-        // Filter out already selected primary student and already linked students
-        const availableStudents = arr.filter((student: Student) => 
-          student.id !== selectedStudent?.id && !linkedStudents.find(ls => ls.id === student.id)
-        );
-        const filtered = availableStudents.filter((student: Student) => 
+        const filtered = arr.filter((student: Student) =>
           (student.first_name?.toLowerCase().startsWith(searchTerm) ||
-           student.last_name?.toLowerCase().startsWith(searchTerm) ||
-           student.id?.toLowerCase().startsWith(searchTerm))
+            student.last_name?.toLowerCase().startsWith(searchTerm) ||
+            student.id?.toLowerCase().startsWith(searchTerm))
         );
-        // setStudents(arr); // Potentially remove if students are only fetched for filtering
+        setStudents(arr);
         setFilteredStudents(filtered);
       } catch (error) {
-        // setStudents([]); // Potentially remove
+        setStudents([]);
         setFilteredStudents([]);
       } finally {
         setIsLoadingStudents(false);
         setSearching(false);
       }
     }, 300);
+
     return () => {
       if (searchTimeout.current) clearTimeout(searchTimeout.current);
     };
-  }, [searchQuery, selectedStudent, linkedStudents]);
+  }, [searchQuery]);
 
-  // AJAX search for linked students
-  useEffect(() => {
-    const searchTerm = linkedStudentSearchQuery.trim().toLowerCase();
-    if (searchTerm.length < 2) {
-      setFilteredLinkedStudents([]);
-      setIsLoadingLinkedStudentSearch(false);
-      return;
-    }
-    setIsLoadingLinkedStudentSearch(true);
-    setSearchingLinked(true);
-    if (linkedSearchTimeout.current) clearTimeout(linkedSearchTimeout.current);
-    linkedSearchTimeout.current = setTimeout(async () => {
-      try {
-        const response = await fetch(`/api/students?search=${encodeURIComponent(searchTerm)}`);
-        if (!response.ok) throw new Error("Failed to fetch students for linking");
-        const data = await response.json();
-        const arr = Array.isArray(data) ? data : [];
-        // Filter out the primary selected student and already linked students
-        const availableToLink = arr.filter((student: Student) => 
-          student.id !== selectedStudent?.id && 
-          !linkedStudents.some(ls => ls.id === student.id)
-        );
-        const filtered = availableToLink.filter((student: Student) =>
-          (student.first_name?.toLowerCase().startsWith(searchTerm) ||
-           student.last_name?.toLowerCase().startsWith(searchTerm) ||
-           student.id?.toLowerCase().startsWith(searchTerm))
-        );
-        setFilteredLinkedStudents(filtered);
-      } catch (error) {
-        setFilteredLinkedStudents([]);
-      } finally {
-        setIsLoadingLinkedStudentSearch(false);
-        setSearchingLinked(false);
-      }
-    }, 300);
-    return () => {
-      if (linkedSearchTimeout.current) clearTimeout(linkedSearchTimeout.current);
-    };
-  }, [linkedStudentSearchQuery, selectedStudent, linkedStudents]);
-
-  // Fetch student details and merge emergency contacts into selectedStudent
+  // ✅ STUDENT PROFILE DETAILS
   useEffect(() => {
     async function fetchStudentDetailsAndContacts() {
       if (!selectedStudent) return;
@@ -209,22 +153,10 @@ export function IncidentReportForm() {
     if (selectedStudent) fetchStudentDetailsAndContacts();
   }, [selectedStudent?.id]);
 
+  // ✅ STUDENT SELECT HANDLER
   const handleStudentSelect = (student: Student) => {
     setSelectedStudent(student);
-    setSearchQuery(""); // Clear primary search query
-    setFilteredStudents([]); // Clear primary search results
-  };
-
-  const handleAddLinkedStudent = (student: Student) => {
-    if (!linkedStudents.find(ls => ls.id === student.id) && selectedStudent?.id !== student.id) {
-      setLinkedStudents(prev => [...prev, student]);
-    }
-    setLinkedStudentSearchQuery(""); // Clear linked student search query
-    setFilteredLinkedStudents([]); // Clear linked student search results
-  };
-
-  const handleRemoveLinkedStudent = (studentId: string) => {
-    setLinkedStudents(prev => prev.filter(student => student.id !== studentId));
+    setSearchQuery("");
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -248,7 +180,7 @@ export function IncidentReportForm() {
       student_id: selectedStudent?.id,
       role: "primary", // For the primary student
       // Add linked students, body map markers, etc.
-      linked_students: linkedStudents.map(ls => ({ student_id: ls.id, role: "linked" })), // Example structure
+      // linked_students: linkedStudents.map(ls => ({ student_id: ls.id, role: "linked" })), // Example structure
       body_map_markers: bodyMapMarkers,
       // ... other fields like category_id, subcategory_id, location_id
     };
@@ -461,6 +393,7 @@ export function IncidentReportForm() {
                 <p className="text-sm text-muted-foreground">Add any other students involved in this incident</p>
 
                 <div className="space-y-2">
+                  {/*
                   {linkedStudents.map((student) => (
                     <div key={student.id} className="flex items-center gap-2 p-2 border rounded-md bg-muted/20">
                       <Avatar className="h-8 w-8">
@@ -541,6 +474,7 @@ export function IncidentReportForm() {
                        {searchingLinked && <div className="text-xs text-gray-500 mt-1">Searching linked...</div>}
                     </div>
                   )}
+                  */}
                 </div>
               </div>
             </CardContent>
